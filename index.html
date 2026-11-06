@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <header class="top">
@@ -41,7 +41,8 @@
   </section>
 
   <section class="card" id="maps">
-    <h2>Euro model <span class="chip">ECMWF</span></h2>
+    <h2>Forecast maps <span id="model-chip" class="chip">Euro</span></h2>
+    <label class="model-pick">Model <select id="model" aria-label="Forecast model"></select></label>
     <div id="tabs" class="tabs" role="tablist" aria-label="Map view"></div>
     <p id="map-sub" class="small muted"></p>
     <div id="map-wrap" class="map-wrap"><canvas id="map" aria-label="Forecast map"></canvas></div>
@@ -65,12 +66,12 @@
 
   <section class="card" id="tt">
     <h2>Compare on Tropical Tidbits</h2>
-    <p class="small muted">Opens the Euro page in your browser. The maps above are drawn by this app from open data, so they will look a little different.</p>
+    <p class="small muted">Opens the selected model's page in your browser. The maps above are drawn by this app from open data, so they will look a little different.</p>
     <div id="links" class="links"></div>
   </section>
 
   <footer class="small muted">
-    Model data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (ECMWF IFS open data, CC BY 4.0).
+    Model data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (ECMWF, NOAA GFS, AIGFS and RRFS open data, CC BY 4.0). Snowfall is estimated at a 10:1 snow-to-water ratio.
     Station data: Weather Underground. Not for safety-critical decisions.
   </footer>
 </main>
@@ -91,6 +92,7 @@
         <option value="fine">Fine (sharper, about 475 points)</option>
       </select>
     </label>
+    <p class="small muted">RRFS always uses the fine grid.</p>
     <label class="check"><input id="set-demo" type="checkbox"> Demo mode (made-up data, for testing)</label>
     <div class="row">
       <button id="set-check" class="btn" type="button">Run checks</button>
@@ -108,7 +110,7 @@
   </form>
 </dialog>
 
-<script src="geo.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="geo.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

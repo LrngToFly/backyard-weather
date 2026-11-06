@@ -9,7 +9,9 @@
   var DOM = { lat0: 40.0, lat1: 44.5, lon0: -74.5, lon1: -68.5 };
   var DOM_KEY = [DOM.lat0, DOM.lat1, DOM.lon0, DOM.lon1].join(',');
   var OM = 'https://api.open-meteo.com/v1/ecmwf';
-  var TT = 'https://www.tropicaltidbits.com/analysis/models/?model=ecmwf&region=neus&pkg=';
+  var OM_BASE = 'https://api.open-meteo.com/v1/';
+  var TT_BASE = 'https://www.tropicaltidbits.com/analysis/models/?region=neus';
+  var CACHE_VER = 4; // bump when the saved-map format changes
   var GRID_TTL = 2 * 3600 * 1000; // reuse saved model data for 2 hours
   var CITIES = [
     ['Boston', 42.36, -71.06], ['Hartford', 41.76, -72.67], ['Providence', 41.82, -71.41],
@@ -20,8 +22,20 @@
     { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (in/hr)' },
     { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (in/hr) colored by type' },
     { id: 'apcpn', label: 'Total Precip', tt: 'apcpn', sub: 'Precipitation accumulated since the first time shown (inches)' },
+    { id: 'asnow', label: 'Total Snow', tt: 'asnow', sub: 'Snowfall accumulated since the first time shown (inches, 10:1 snow-to-water ratio)' },
     { id: 't2m', label: '2m Temp', tt: 'T2m', sub: '2-metre air temperature (°F); cyan line = freezing' }
   ];
+  // Forecast models. ep/om = Open-Meteo endpoint and model name; tt = Tropical Tidbits model code.
+  // type: Open-Meteo reports rain/snow type directly (otherwise it is worked out from the snowfall amount).
+  var MODELS = [
+    { id: 'ecmwf', label: 'Euro (ECMWF IFS)', short: 'Euro', ep: 'ecmwf', om: 'ecmwf_ifs025', tt: 'ecmwf', days: 8, type: true },
+    { id: 'gfs', label: 'GFS', short: 'GFS', ep: 'gfs', om: 'gfs_seamless', tt: 'gfs', days: 8 },
+    { id: 'aifs', label: 'EC-AIFS (AI)', short: 'EC-AIFS', ep: 'ecmwf', om: 'ecmwf_aifs025_single', tt: 'ec-aifs', days: 8 },
+    { id: 'aigfs', label: 'AIGFS (AI)', short: 'AIGFS', ep: 'gfs', om: 'ncep_aigfs025', tt: 'aigfs', days: 8 },
+    { id: 'rrfs', label: 'RRFS (3 km, 4 days)', short: 'RRFS', ep: 'gfs', om: 'ncep_rrfs_conus', tt: 'rrfs', days: 5, fine: true, noFrzn: true }
+  ];
+  var SNOW_T = [0.1, 1, 2, 4, 6, 8, 12, 18, 24, 30, 36, 48];
+  var SNOW_C = ['#cfe3f7', '#9ec9f0', '#6aa8e6', '#3f83d8', '#2a5fc4', '#3a3fae', '#5a2f9e', '#7b2a94', '#a02c8c', '#c8368a', '#e8579b', '#f5a3c6'];
 
   // ---------------------------------------------------------------- helpers
   function el(id) { return document.getElementById(id); }
@@ -122,12 +136,17 @@
   var RGB = {};
   Object.keys(PAL).forEach(function (k) { RGB[k] = PAL[k].map(hex); });
   var ACC_RGB = ACC_C.map(hex);
+  var SNOW_RGB = SNOW_C.map(hex);
 
   // ---------------------------------------------------------------- model data
   var gridData = null;   // maps
   var pointData = null;  // backyard series
   var station = null;
   var gridNote = '';
+  var modelId = store.get('wx.model', 'ecmwf');
+  if (!MODELS.some(function (m) { return m.id === modelId; })) modelId = 'ecmwf';
+  function curModel() { return MODELS.filter(function (m) { return m.id === modelId; })[0]; }
+  function effDetail(M) { return M.fine ? 'fine' : settings.detail; }
   var view = store.get('wx.view', 'mslp_pcpn');
   if (!VIEWS.some(function (v) { return v.id === view; })) view = 'mslp_pcpn';
   var stepIdx = 0;
@@ -154,20 +173,20 @@
     }
     return r.json();
   }
-  async function fetchGrid(spec, useType) {
+  async function fetchGrid(spec, useType, M) {
     var pts = [], j, i;
     for (j = 0; j < spec.ny; j++) for (i = 0; i < spec.nx; i++) pts.push([spec.lats[j], spec.lons[i]]);
     var CH = 100, chunks = [];
     for (var k = 0; k < pts.length; k += CH) chunks.push(pts.slice(k, k + CH));
-    var vars = 'pressure_msl,precipitation,temperature_2m' + (useType ? ',precipitation_type' : '');
+    var vars = 'pressure_msl,precipitation,temperature_2m,snowfall' + (useType ? ',precipitation_type' : '');
     var results = new Array(chunks.length), next = 0;
     async function worker() {
       while (next < chunks.length) {
         var c = next++;
         var lat = chunks[c].map(function (p) { return p[0]; }).join(',');
         var lon = chunks[c].map(function (p) { return p[1]; }).join(',');
-        var url = OM + '?latitude=' + lat + '&longitude=' + lon + '&hourly=' + vars +
-          '&models=ecmwf_ifs025&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&timezone=GMT&forecast_days=8';
+        var url = OM_BASE + M.ep + '?latitude=' + lat + '&longitude=' + lon + '&hourly=' + vars +
+          '&models=' + M.om + '&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&timezone=GMT&forecast_days=' + M.days;
         var arr;
         try { arr = await omFetch(url); }
         catch (e) {
@@ -182,19 +201,22 @@
     await Promise.all([worker(), worker(), worker()]);
     var first = pick(results[0][0].hourly, 'time'), nt = first.length, npts = pts.length;
     var d = {
-      detail: settings.detail, dom: DOM_KEY, spec: spec, nt: nt, times: Float64Array.from(first), fetchedAt: Date.now(),
-      p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt),
-      pt: useType ? new Int8Array(npts * nt) : null, hasType: !!useType, model: 'ecmwf_ifs025'
+      detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: Float64Array.from(first), fetchedAt: Date.now(),
+      p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt),
+      pt: useType ? new Int8Array(npts * nt) : null, hasType: !!useType, model: M.om, hLast: 0
     };
     var base = 0;
     results.forEach(function (arr, c) {
       arr.forEach(function (loc, q) {
         var h = loc.hourly, idx = (c * CH + q) * nt;
-        var P = pick(h, 'pressure_msl'), R = pick(h, 'precipitation'), T = pick(h, 'temperature_2m'), Y = useType ? pick(h, 'precipitation_type') : null;
+        var P = pick(h, 'pressure_msl'), R = pick(h, 'precipitation'), T = pick(h, 'temperature_2m'), S = pick(h, 'snowfall'), Y = useType ? pick(h, 'precipitation_type') : null;
         for (var x = 0; x < nt; x++) {
           d.p[idx + x] = P && P[x] !== null ? P[x] : NaN;
           d.pr[idx + x] = R && R[x] !== null ? R[x] : NaN;
           d.t[idx + x] = T && T[x] !== null ? T[x] : NaN;
+          // Open-Meteo snowfall is 0.7 cm (0.7 x water depth); x 10/7 gives a 10:1 snow depth like Tropical Tidbits
+          d.sn[idx + x] = S && S[x] !== null ? S[x] * 10 / 7 : NaN;
+          if (P && P[x] !== null && x > d.hLast) d.hLast = x;
           if (useType) d.pt[idx + x] = Y && Y[x] !== null ? Y[x] : -1;
         }
       });
@@ -203,33 +225,38 @@
     return d;
   }
   async function loadGrid(force) {
-    var spec = gridSpec(settings.detail);
+    var M = curModel(), spec = gridSpec(effDetail(M)), key = 'grid-' + M.id;
     gridNote = '';
-    if (demo) { gridData = makeDemoGrid(spec); buildSteps(gridData); gridNote = 'DEMO data (not real forecasts)'; return; }
-    var cached = await idb.get('grid');
-    var fresh = cached && cached.detail === settings.detail && cached.dom === DOM_KEY && cached.model === 'ecmwf_ifs025' && (Date.now() - cached.fetchedAt) < GRID_TTL;
-    if (fresh && !force) { gridData = cached; buildSteps(gridData); log('Maps: using saved Euro data from ' + fmtClock(cached.fetchedAt)); return; }
-    var useType = store.get('wx.hasType', true);
+    if (demo) { gridData = makeDemoGrid(spec, M); buildSteps(gridData); gridNote = 'DEMO data (not real forecasts)'; return; }
+    var cached = await idb.get(key);
+    function usable(c) { return c && c.ver === CACHE_VER && c.detail === effDetail(M) && c.dom === DOM_KEY && c.modelId === M.id; }
+    var fresh = usable(cached) && (Date.now() - cached.fetchedAt) < GRID_TTL;
+    if (M.id !== modelId) return;
+    if (fresh && !force) { gridData = cached; buildSteps(gridData); log(M.short + ': using saved data from ' + fmtClock(cached.fetchedAt)); return; }
+    var useType = !!M.type && store.get('wx.hasType', true);
     try {
       var d;
       try {
-        d = await fetchGrid(spec, useType);
+        d = await fetchGrid(spec, useType, M);
       } catch (e) {
         if (useType && /precipitation_type|variable/i.test(e.message || '')) {
-          log('Maps: precipitation type not offered; retrying without it (type will be estimated from temperature)');
+          log('Maps: precipitation type not offered; retrying without it (type will be estimated)');
           useType = false; store.set('wx.hasType', false);
-          d = await fetchGrid(spec, false);
+          d = await fetchGrid(spec, false, M);
         } else { throw e; }
       }
-      gridData = d; buildSteps(d); idb.set('grid', d);
-      log('Maps: fetched ' + spec.nx * spec.ny + ' points, ' + d.nt + ' hours' + (d.hasType ? ', with precip type' : ', type estimated'));
+      idb.set(key, d);
+      log(M.short + ': fetched ' + spec.nx * spec.ny + ' points, ' + d.nt + ' hours' + (d.hasType ? ', with precip type' : ', type from snowfall'));
+      if (M.id !== modelId) return;
+      gridData = d; buildSteps(d);
     } catch (e) {
-      log('Maps error: ' + friendlyError(e));
-      if (cached && cached.detail === settings.detail && cached.dom === DOM_KEY) {
+      log(M.short + ' error: ' + friendlyError(e));
+      if (M.id !== modelId) return;
+      if (usable(cached)) {
         gridData = cached; buildSteps(cached);
         gridNote = 'Showing saved run from ' + fmtClock(cached.fetchedAt) + ' (could not refresh: ' + friendlyError(e) + ')';
       } else {
-        gridData = null; gridNote = 'Could not load Euro data: ' + friendlyError(e);
+        gridData = null; gridNote = 'Could not load ' + M.short + ' data: ' + friendlyError(e);
       }
     }
   }
@@ -237,7 +264,7 @@
     var now = Date.now() / 1000, t0 = Math.floor(now / 10800) * 10800, steps = [];
     for (var h = 0; h < d.nt; h++) {
       var t = d.times[h]; if (t < t0) continue;
-      var lead = (t - t0) / 3600; if (lead > 168) break;
+      var lead = (t - t0) / 3600; if (lead > 168 || h > d.hLast) break;
       var hr = t / 3600;
       if (hr % 3 !== 0) continue;
       if (lead > 144 && hr % 6 !== 0) continue;
@@ -382,7 +409,7 @@
     if (stepCache.has(si)) return stepCache.get(si);
     var st = d.steps[si], h = st.h, s0 = d.steps[0].h, nt = d.nt, spec = d.spec, npts = spec.nx * spec.ny;
     var prevH = si > 0 ? d.steps[si - 1].h : h - 3, dt = Math.max(1, h - prevH);
-    var mslp = new Float32Array(npts), t2 = new Float32Array(npts), rate = new Float32Array(npts), acc = new Float32Array(npts);
+    var mslp = new Float32Array(npts), t2 = new Float32Array(npts), rate = new Float32Array(npts), acc = new Float32Array(npts), snacc = new Float32Array(npts);
     var fs = new Float32Array(npts), fm = new Float32Array(npts), ff = new Float32Array(npts);
     for (var p = 0; p < npts; p++) {
       var base = p * nt;
@@ -392,9 +419,21 @@
       rate[p] = cnt ? sum / cnt : 0;
       var a = 0; for (k = s0 + 1; k <= h; k++) { v = d.pr[base + k]; if (v === v) a += v; }
       acc[p] = a;
+      var sa = 0; for (k = s0 + 1; k <= h; k++) { v = d.sn[base + k]; if (v === v) sa += v; }
+      snacc[p] = sa;
       var code = d.hasType ? d.pt[base + h] : -1, T = t2[p];
       if (code > 0) {
         if (code === 5 || code === 6) fs[p] = 1; else if (code === 7) fm[p] = 1; else if (code === 3 || code === 8 || code === 12) ff[p] = 1;
+      } else if (!d.hasType) {
+        // no type from the model: share of the water that fell as snow (10:1 depth / 10 = snow water), rest by temperature
+        var wnow = d.pr[base + h], snw = d.sn[base + h] * 0.1; // d.sn is a 10:1 depth, so water = depth / 10
+        if (wnow === wnow && wnow > 0.0005 && snw === snw) {
+          var frac = clamp(snw / wnow, 0, 1);
+          fs[p] = frac;
+          if (frac < 0.5 && T === T && T <= 35) { if (T <= 31) ff[p] = 1 - frac; else fm[p] = 1 - frac; }
+        } else if (T === T) {
+          if (T <= 31) fs[p] = 1; else if (T <= 35) fm[p] = 1;
+        }
       } else if (T === T) {
         if (T <= 31) fs[p] = 1; else if (T <= 35) fm[p] = 1;
       }
@@ -404,7 +443,7 @@
     var g = {
       K: K2, nxu: (spec.nx - 1) * K2 + 1, nyu: (spec.ny - 1) * K2 + 1, spec: spec, deg: spec.step / K2,
       mslp: upCubic(mslp, spec.nx, spec.ny, K2), t2: upCubic(t2, spec.nx, spec.ny, K2),
-      rate: upBilinear(rate, spec.nx, spec.ny, K2), acc: upBilinear(acc, spec.nx, spec.ny, K2),
+      rate: upBilinear(rate, spec.nx, spec.ny, K2), acc: upBilinear(acc, spec.nx, spec.ny, K2), snacc: upBilinear(snacc, spec.nx, spec.ny, K2),
       fs: upBilinear(fs, spec.nx, spec.ny, K2), fm: upBilinear(fm, spec.nx, spec.ny, K2), ff: upBilinear(ff, spec.nx, spec.ny, K2)
     };
     stepCache.set(si, g);
@@ -506,6 +545,9 @@
         } else if (view === 'apcpn') {
           v = bil(g.acc, x0, tx, y0, ty);
           if (v >= ACC_T[0]) { k = 0; while (k < ACC_T.length - 1 && v >= ACC_T[k + 1]) k++; rgb = ACC_RGB[k]; alpha = 228; }
+        } else if (view === 'asnow') {
+          v = bil(g.snacc, x0, tx, y0, ty);
+          if (v >= SNOW_T[0]) { k = 0; while (k < SNOW_T.length - 1 && v >= SNOW_T[k + 1]) k++; rgb = SNOW_RGB[k]; alpha = 232; }
         } else {
           v = bil(g.rate, x0, tx, y0, ty);
           if (v >= RATE_T[0]) {
@@ -553,13 +595,13 @@
       if (view === 't2m') {
         ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.6;
         contourChains(g.t2, g.nxu, g.nyu, 32).forEach(function (ch) { pathChain(ctx, ch, g, proj); ctx.stroke(); });
-      } else if (view !== 'apcpn') {
+      } else if (view !== 'apcpn' && view !== 'asnow') {
         drawPressure(ctx, g, proj);
       }
     } else {
       geoLines(ctx, proj);
       ctx.fillStyle = '#9fb0c0'; ctx.font = '14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(d ? 'No forecast steps available' : 'Loading Euro data…', W / 2, H / 2);
+      ctx.fillText(d ? 'No forecast steps available' : (/could not/i.test(gridNote) ? 'Forecast data unavailable' : 'Loading ' + curModel().short + ' data…'), W / 2, H / 2);
     }
     cities(ctx, proj, W, H);
     drawLegend();
@@ -644,6 +686,7 @@
       ctx.fillStyle = txt; for (k = 0; k < n; k += (n > 11 ? 2 : 2)) ctx.fillText(labelFmt(thr[k]), x0 + k * cw + cw / 2, yy + 26);
     }
     if (view === 'apcpn') { bins(ACC_T, ACC_C, function (v) { return String(v); }, y); return; }
+    if (view === 'asnow') { bins(SNOW_T, SNOW_C, function (v) { return String(v); }, y); return; }
     bins(RATE_T, PAL.rain, function (v) { return String(v); }, y);
     if (view === 'mslp_pcpn_frzn') {
       var types = [['Rain', PAL.rain[1]], ['Mix', PAL.mix[3]], ['Snow', PAL.snow[2]], ['Freezing', PAL.frz[3]]], cw2 = bw / 4;
@@ -663,7 +706,7 @@
       sl.max = d.steps.length - 1; sl.value = stepIdx; sl.disabled = false;
       var s = d.steps[stepIdx];
       lab.textContent = fmtDay(s.t) + '  ·  +' + Math.round(s.lead) + ' h';
-      if (!msg) msg = 'ECMWF IFS via Open-Meteo · ' + d.spec.step + '° map grid · loaded ' + fmtClock(d.fetchedAt) + (d.hasType ? '' : ' · precip type estimated from temperature');
+      if (!msg) msg = curModel().short + ' via Open-Meteo · ' + d.spec.step + '° map grid · loaded ' + fmtClock(d.fetchedAt) + (d.hasType ? '' : ' · rain/snow from snowfall amount') + ' · runs to +' + Math.round(d.steps[d.steps.length - 1].lead) + ' h';
     } else { sl.disabled = true; lab.textContent = '—'; }
     note.textContent = msg; note.className = 'small ' + (gridNote && /Could not|could not/.test(gridNote) ? 'warn' : 'muted');
   }
@@ -680,6 +723,36 @@
     var d = gridData; if (!d || !d.steps) return;
     el('play').textContent = '❚❚'; el('play').setAttribute('aria-label', 'Pause');
     playTimer = setInterval(function () { setStep(stepIdx >= gridData.steps.length - 1 ? 0 : stepIdx + 1); }, 550);
+  }
+  function buildModelPicker() {
+    var sel = el('model'); sel.innerHTML = '';
+    MODELS.forEach(function (m) { var o = document.createElement('option'); o.value = m.id; o.textContent = m.label; sel.appendChild(o); });
+    sel.value = modelId;
+    el('model-chip').textContent = curModel().short;
+  }
+  function buildLinks() {
+    var M = curModel(), links = el('links'); links.innerHTML = '';
+    VIEWS.forEach(function (v) {
+      var pkg = (v.id === 'mslp_pcpn_frzn' && M.noFrzn) ? 'mslp_pcpn' : v.tt;
+      var a = document.createElement('a'); a.className = 'link'; a.href = TT_BASE + '&model=' + M.tt + '&pkg=' + pkg; a.target = '_blank'; a.rel = 'noopener';
+      a.innerHTML = '<span></span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      a.firstChild.textContent = M.short + ' · ' + v.label; links.appendChild(a);
+    });
+  }
+  async function switchModel(id) {
+    var oldT = gridData && gridData.steps && gridData.steps[stepIdx] ? gridData.steps[stepIdx].t : null;
+    stopPlay(); modelId = id; store.set('wx.model', id);
+    el('model-chip').textContent = curModel().short; buildLinks();
+    gridData = null; gridNote = ''; stepCache.clear(); scheduleRender();
+    el('map-note').textContent = 'Loading ' + curModel().short + '…'; el('map-note').className = 'small muted';
+    await loadGrid(false);
+    if (id !== modelId) return;
+    if (oldT && gridData && gridData.steps && gridData.steps.length) {
+      var best = 0, bd = Infinity;
+      gridData.steps.forEach(function (st, i) { var dd = Math.abs(st.t - oldT); if (dd < bd) { bd = dd; best = i; } });
+      stepIdx = best;
+    }
+    scheduleRender();
   }
   function buildTabs() {
     var box = el('tabs'); box.innerHTML = '';
@@ -744,9 +817,10 @@
   }
 
   // ---------------------------------------------------------------- demo data
-  function makeDemoGrid(spec) {
-    var nt = 8 * 24, npts = spec.nx * spec.ny, t0 = Math.floor(Date.now() / 86400000) * 86400;
-    var d = { detail: settings.detail, dom: DOM_KEY, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), pt: new Int8Array(npts * nt), hasType: true, model: 'demo' };
+  function makeDemoGrid(spec, M) {
+    var nt = 8 * 24, npts = spec.nx * spec.ny, t0 = Math.floor(Date.now() / 86400000) * 86400, hasT = !!M.type;
+    var d = { detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), pt: hasT ? new Int8Array(npts * nt) : null, hasType: hasT, model: 'demo', hLast: M.id === 'rrfs' ? 96 : nt - 1 };
+    var shift = { ecmwf: 0, gfs: 0.25, aifs: -0.2, aigfs: 0.4, rrfs: 0.1 }[M.id] || 0;
     var elapsed = (Date.now() / 1000 - t0) / 3600;
     for (var h = 0; h < nt; h++) {
       d.times[h] = t0 + h * 3600;
@@ -757,12 +831,14 @@
         d.p[idx] = 1019 - 24 * Math.exp(-r2 / (2 * 3.2 * 3.2)) + 5 * Math.sin(lon * 0.6 + 1) * Math.cos(lat * 0.4);
         var ex = dx - 1.3, ey = dy - 1.1, band = Math.exp(-(ex * ex + ey * ey) / (2 * 2.2 * 2.2));
         var wob = 0.65 + 0.35 * Math.sin(lon * 1.7 + lat * 1.3 + h * 0.05);
-        var rate = Math.max(0, 0.22 * band * wob - 0.015);
+        var rate = Math.max(0, 0.22 * band * wob - 0.015 + shift * 0.01);
         d.pr[idx] = rate;
         var diur = 3 * Math.sin(((t0 + h * 3600) / 3600 % 24 - 9) / 24 * 6.283);
         var T = 41 - 2.6 * (lat - 42) + (lon + 71) * 0.4 + diur - 5 * Math.exp(-r2 / 18);
         d.t[idx] = T;
-        d.pt[idx] = rate > 0 ? (T <= 30 ? 5 : T <= 33 ? (lon < -72 ? 3 : 7) : T <= 36 ? 7 : 1) : 0;
+        if (hasT) d.pt[idx] = rate > 0 ? (T <= 30 ? 5 : T <= 33 ? (lon < -72 ? 3 : 7) : T <= 36 ? 7 : 1) : 0;
+        // demo snowfall (10:1 inches): all-snow when cold, half when near freezing
+        d.sn[idx] = rate > 0 ? rate * 10 * (T <= 31 ? 1 : T <= 34 ? 0.5 : 0) : 0;
       }
     }
     return d;
@@ -814,6 +890,10 @@
       add('Euro data (Open-Meteo): OK ✓ (' + pick(j.hourly, 'temperature_2m').length + ' hours)');
     } catch (e) { add('Euro data (Open-Meteo): FAILED – ' + friendlyError(e)); }
     try {
+      var M = curModel(), j3 = await omFetch(OM_BASE + M.ep + '?latitude=' + HOME.lat + '&longitude=' + HOME.lon + '&hourly=pressure_msl,precipitation,temperature_2m,snowfall&models=' + M.om + '&forecast_days=2&timeformat=unixtime');
+      add(M.short + ' maps data: OK ✓ (' + (pick(j3.hourly, 'snowfall') || []).length + ' hours incl. snowfall)');
+    } catch (e) { add(curModel().short + ' maps data: FAILED – ' + friendlyError(e)); }
+    try {
       var j2 = await omFetch(OM + '?latitude=' + HOME.lat + '&longitude=' + HOME.lon + '&hourly=precipitation_type&models=ecmwf_ifs025&forecast_days=1&timeformat=unixtime');
       add('Precip type available: yes ✓ (' + pick(j2.hourly, 'precipitation_type').length + ' values)');
     } catch (e) { add('Precip type available: no – ' + friendlyError(e) + ' (type will be estimated from temperature)'); }
@@ -841,13 +921,9 @@
   }
   function init() {
     document.querySelector('.sub').textContent = 'Hopkinton, MA · ' + settings.stationId;
-    var links = el('links'); links.innerHTML = '';
-    VIEWS.forEach(function (v) {
-      var a = document.createElement('a'); a.className = 'link'; a.href = TT + v.tt; a.target = '_blank'; a.rel = 'noopener';
-      a.innerHTML = '<span></span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      a.firstChild.textContent = v.label; links.appendChild(a);
-    });
+    buildModelPicker(); buildLinks();
     buildTabs(); updateBanner();
+    el('model').addEventListener('change', function (e) { switchModel(e.target.value); });
     el('slider').addEventListener('input', function (e) { stopPlay(); setStep(+e.target.value); });
     el('prev').addEventListener('click', function () { stopPlay(); setStep(stepIdx - 1); });
     el('next').addEventListener('click', function () { stopPlay(); setStep(stepIdx + 1); });
@@ -857,7 +933,7 @@
     el('set-save').addEventListener('click', function (e) { e.preventDefault(); saveSettings(); });
     el('set-cancel').addEventListener('click', function () { el('settings').close(); });
     el('set-check').addEventListener('click', runChecks);
-    el('set-clear').addEventListener('click', async function () { await idb.del('grid'); store.del('wx.hasType'); stepCache.clear(); log('Saved model data cleared'); el('check-out').textContent = 'Saved model data cleared.'; });
+    el('set-clear').addEventListener('click', async function () { await Promise.all(MODELS.map(function (m) { return idb.del('grid-' + m.id); })); await idb.del('grid'); store.del('wx.hasType'); stepCache.clear(); log('Saved model data cleared'); el('check-out').textContent = 'Saved model data cleared.'; });
     document.body.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('[data-action]'); if (!a) return;
       if (a.dataset.action === 'settings') openSettings();
