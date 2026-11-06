@@ -5,8 +5,9 @@
 
   // ---------------------------------------------------------------- constants
   var HOME = { lat: 42.240, lon: -71.504 };
-  // Map area is centred on HOME (about 3 degrees of longitude each side, 2.25 degrees of latitude).
-  var DOM = { lat0: 40.0, lat1: 44.5, lon0: -74.5, lon1: -68.5 };
+  // Map area: home is near the middle; extra room to the west so upstate NY is in view (weather arrives from there).
+  // 7 x 4.5 degrees = about 550 points on the fine (0.25 degree) grid, under Open-Meteo's 600 per minute limit.
+  var DOM = { lat0: 40.0, lat1: 44.5, lon0: -75.5, lon1: -68.5 };
   var DOM_KEY = [DOM.lat0, DOM.lat1, DOM.lon0, DOM.lon1].join(',');
   var OM = 'https://api.open-meteo.com/v1/ecmwf';
   var OM_BASE = 'https://api.open-meteo.com/v1/';
@@ -16,7 +17,7 @@
   var CITIES = [
     ['Boston', 42.36, -71.06], ['Hartford', 41.76, -72.67], ['Providence', 41.82, -71.41],
     ['Albany', 42.65, -73.76], ['Portland', 43.66, -70.26], ['Springfield', 42.10, -72.59],
-    ['Concord', 43.21, -71.54], ['New York', 40.71, -74.0], ['Hyannis', 41.65, -70.28]
+    ['Concord', 43.21, -71.54], ['New York', 40.71, -74.0], ['Hyannis', 41.65, -70.28], ['Utica', 43.10, -75.23]
   ];
   var VIEWS = [
     { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (in/hr)' },
@@ -46,7 +47,7 @@
     set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
     del: function (k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
   };
-  var settings = Object.assign({ apiKey: '', stationId: 'KMAHOPKI22', detail: 'standard' }, store.get('wx.settings', {}));
+  var settings = Object.assign({ apiKey: '', stationId: 'KMAHOPKI22', detail: 'fine' }, store.get('wx.settings', {}));
   var params = new URLSearchParams(location.search);
   var demo = params.get('demo') === '1' || store.get('wx.demo', false);
 
