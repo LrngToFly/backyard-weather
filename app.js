@@ -5,15 +5,16 @@
 
   // ---------------------------------------------------------------- constants
   var HOME = { lat: 42.240, lon: -71.504 };
-  var DOM = { lat0: 40.5, lat1: 47.5, lon0: -74.5, lon1: -66.5 };
+  // Map area is centred on HOME (about 3 degrees of longitude each side, 2.25 degrees of latitude).
+  var DOM = { lat0: 40.0, lat1: 44.5, lon0: -74.5, lon1: -68.5 };
+  var DOM_KEY = [DOM.lat0, DOM.lat1, DOM.lon0, DOM.lon1].join(',');
   var OM = 'https://api.open-meteo.com/v1/ecmwf';
   var TT = 'https://www.tropicaltidbits.com/analysis/models/?model=ecmwf&region=us&pkg=';
   var GRID_TTL = 2 * 3600 * 1000; // reuse saved model data for 2 hours
   var CITIES = [
     ['Boston', 42.36, -71.06], ['Hartford', 41.76, -72.67], ['Providence', 41.82, -71.41],
-    ['Albany', 42.65, -73.76], ['Portland', 43.66, -70.26], ['Burlington', 44.48, -73.21],
-    ['Concord', 43.21, -71.54], ['New York', 40.71, -74.0], ['Montreal', 45.5, -73.57],
-    ['Bangor', 44.8, -68.77]
+    ['Albany', 42.65, -73.76], ['Portland', 43.66, -70.26], ['Springfield', 42.10, -72.59],
+    ['Concord', 43.21, -71.54], ['New York', 40.71, -74.0], ['Hyannis', 41.65, -70.28]
   ];
   var VIEWS = [
     { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (in/hr)' },
@@ -167,14 +168,21 @@
         var lon = chunks[c].map(function (p) { return p[1]; }).join(',');
         var url = OM + '?latitude=' + lat + '&longitude=' + lon + '&hourly=' + vars +
           '&models=ecmwf_ifs025&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&timezone=GMT&forecast_days=8';
-        var arr = await omFetch(url);
+        var arr;
+        try { arr = await omFetch(url); }
+        catch (e) {
+          if (e.status !== 429) throw e;
+          log('Maps: Open-Meteo asked us to slow down; waiting 20 seconds, then retrying');
+          await new Promise(function (r) { setTimeout(r, 20000); });
+          arr = await omFetch(url);
+        }
         results[c] = Array.isArray(arr) ? arr : [arr];
       }
     }
     await Promise.all([worker(), worker(), worker()]);
     var first = pick(results[0][0].hourly, 'time'), nt = first.length, npts = pts.length;
     var d = {
-      detail: settings.detail, spec: spec, nt: nt, times: Float64Array.from(first), fetchedAt: Date.now(),
+      detail: settings.detail, dom: DOM_KEY, spec: spec, nt: nt, times: Float64Array.from(first), fetchedAt: Date.now(),
       p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt),
       pt: useType ? new Int8Array(npts * nt) : null, hasType: !!useType, model: 'ecmwf_ifs025'
     };
@@ -199,7 +207,7 @@
     gridNote = '';
     if (demo) { gridData = makeDemoGrid(spec); buildSteps(gridData); gridNote = 'DEMO data (not real forecasts)'; return; }
     var cached = await idb.get('grid');
-    var fresh = cached && cached.detail === settings.detail && cached.model === 'ecmwf_ifs025' && (Date.now() - cached.fetchedAt) < GRID_TTL;
+    var fresh = cached && cached.detail === settings.detail && cached.dom === DOM_KEY && cached.model === 'ecmwf_ifs025' && (Date.now() - cached.fetchedAt) < GRID_TTL;
     if (fresh && !force) { gridData = cached; buildSteps(gridData); log('Maps: using saved Euro data from ' + fmtClock(cached.fetchedAt)); return; }
     var useType = store.get('wx.hasType', true);
     try {
@@ -217,7 +225,7 @@
       log('Maps: fetched ' + spec.nx * spec.ny + ' points, ' + d.nt + ' hours' + (d.hasType ? ', with precip type' : ', type estimated'));
     } catch (e) {
       log('Maps error: ' + friendlyError(e));
-      if (cached && cached.detail === settings.detail) {
+      if (cached && cached.detail === settings.detail && cached.dom === DOM_KEY) {
         gridData = cached; buildSteps(cached);
         gridNote = 'Showing saved run from ' + fmtClock(cached.fetchedAt) + ' (could not refresh: ' + friendlyError(e) + ')';
       } else {
@@ -655,7 +663,7 @@
       sl.max = d.steps.length - 1; sl.value = stepIdx; sl.disabled = false;
       var s = d.steps[stepIdx];
       lab.textContent = fmtDay(s.t) + '  ·  +' + Math.round(s.lead) + ' h';
-      if (!msg) msg = 'ECMWF IFS 0.25° via Open-Meteo · loaded ' + fmtClock(d.fetchedAt) + (d.hasType ? '' : ' · precip type estimated from temperature');
+      if (!msg) msg = 'ECMWF IFS via Open-Meteo · ' + d.spec.step + '° map grid · loaded ' + fmtClock(d.fetchedAt) + (d.hasType ? '' : ' · precip type estimated from temperature');
     } else { sl.disabled = true; lab.textContent = '—'; }
     note.textContent = msg; note.className = 'small ' + (gridNote && /Could not|could not/.test(gridNote) ? 'warn' : 'muted');
   }
@@ -738,7 +746,7 @@
   // ---------------------------------------------------------------- demo data
   function makeDemoGrid(spec) {
     var nt = 8 * 24, npts = spec.nx * spec.ny, t0 = Math.floor(Date.now() / 86400000) * 86400;
-    var d = { detail: settings.detail, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), pt: new Int8Array(npts * nt), hasType: true, model: 'demo' };
+    var d = { detail: settings.detail, dom: DOM_KEY, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), pt: new Int8Array(npts * nt), hasType: true, model: 'demo' };
     var elapsed = (Date.now() / 1000 - t0) / 3600;
     for (var h = 0; h < nt; h++) {
       d.times[h] = t0 + h * 3600;
