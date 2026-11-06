@@ -9,7 +9,7 @@
   var DOM = { lat0: 40.0, lat1: 44.5, lon0: -74.5, lon1: -68.5 };
   var DOM_KEY = [DOM.lat0, DOM.lat1, DOM.lon0, DOM.lon1].join(',');
   var OM = 'https://api.open-meteo.com/v1/ecmwf';
-  var TT = 'https://www.tropicaltidbits.com/analysis/models/?model=ecmwf&region=us&pkg=';
+  var TT = 'https://www.tropicaltidbits.com/analysis/models/?model=ecmwf&region=neus&pkg=';
   var GRID_TTL = 2 * 3600 * 1000; // reuse saved model data for 2 hours
   var CITIES = [
     ['Boston', 42.36, -71.06], ['Hartford', 41.76, -72.67], ['Providence', 41.82, -71.41],
