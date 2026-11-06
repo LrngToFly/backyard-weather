@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Backyard Weather</title>
+<meta name="description" content="Live backyard station readings with ECMWF (Euro) forecast maps.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Backyard">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f2f4f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1720" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Backyard Weather</h1>
+    <div class="sub">Hopkinton, MA</div>
+  </div>
+  <div class="actions">
+    <button id="refresh" class="icon-btn" type="button" aria-label="Refresh">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="open-settings" class="icon-btn" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="card" id="station">
+    <h2>Your station <span class="chip">live</span></h2>
+    <div id="station-body"><p class="muted">Loading…</p></div>
+  </section>
+
+  <section class="card" id="maps">
+    <h2>Euro model <span class="chip">ECMWF</span></h2>
+    <div id="tabs" class="tabs" role="tablist" aria-label="Map view"></div>
+    <p id="map-sub" class="small muted"></p>
+    <div id="map-wrap" class="map-wrap"><canvas id="map" aria-label="Forecast map"></canvas></div>
+    <canvas id="legend" class="legend" aria-hidden="true"></canvas>
+    <div class="controls">
+      <button id="prev" class="ctl" type="button" aria-label="Previous time">‹</button>
+      <button id="play" class="ctl play" type="button" aria-label="Play">▶</button>
+      <button id="next" class="ctl" type="button" aria-label="Next time">›</button>
+    </div>
+    <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="Forecast time" disabled>
+    <div id="time-label" class="time-label">—</div>
+    <p id="map-note" class="small muted"></p>
+  </section>
+
+  <section class="card" id="point">
+    <h2>Euro at your backyard</h2>
+    <div id="chart-wrap"><canvas id="chart" aria-label="Five day forecast chart"></canvas></div>
+    <div id="daily" class="daily"></div>
+    <p id="point-note" class="small muted"></p>
+  </section>
+
+  <section class="card" id="tt">
+    <h2>Compare on Tropical Tidbits</h2>
+    <p class="small muted">Opens the Euro page in your browser. The maps above are drawn by this app from open data, so they will look a little different.</p>
+    <div id="links" class="links"></div>
+  </section>
+
+  <footer class="small muted">
+    Model data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (ECMWF IFS open data, CC BY 4.0).
+    Station data: Weather Underground. Not for safety-critical decisions.
+  </footer>
+</main>
+
+<dialog id="settings">
+  <form method="dialog" class="settings-form">
+    <h2>Settings</h2>
+    <label>Weather Underground API key
+      <input id="set-key" type="text" class="secret" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your key">
+    </label>
+    <p class="small muted">Stored only on this phone. Get a free key at wunderground.com/member/api-keys.</p>
+    <label>Station ID
+      <input id="set-station" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
+    </label>
+    <label>Map detail
+      <select id="set-detail">
+        <option value="standard">Standard (faster, about 255 points)</option>
+        <option value="fine">Fine (sharper, about 950 points)</option>
+      </select>
+    </label>
+    <label class="check"><input id="set-demo" type="checkbox"> Demo mode (made-up data, for testing)</label>
+    <div class="row">
+      <button id="set-check" class="btn" type="button">Run checks</button>
+      <button id="set-clear" class="btn" type="button">Clear saved maps</button>
+    </div>
+    <pre id="check-out" class="out small"></pre>
+    <details>
+      <summary>Diagnostics log</summary>
+      <pre id="diag-log" class="out small"></pre>
+    </details>
+    <div class="row end">
+      <button id="set-cancel" class="btn" type="button">Cancel</button>
+      <button id="set-save" class="btn primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="geo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
