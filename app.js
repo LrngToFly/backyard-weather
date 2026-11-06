@@ -98,6 +98,7 @@
     if (e && (e.name === 'TypeError') || /Load failed|Failed to fetch|NetworkError/i.test(m)) {
       return 'Could not connect (' + m + '). Either there is no internet, or the site refuses requests from a web page.';
     }
+    if (e && e.status === 429) return 'Open-Meteo\'s free limit was reached (' + (e.reason || 'too many requests') + '). Wait a minute, then tap refresh.';
     return m;
   }
   function fmtDay(t) { return new Date(t * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric' }); }
@@ -173,6 +174,18 @@
     }
     return r.json();
   }
+  var rateUntil = 0;
+  function rateWait(sec) {
+    rateUntil = Math.max(rateUntil, Date.now() + sec * 1000);
+    return new Promise(function (res) {
+      (function tick() {
+        var left = Math.ceil((rateUntil - Date.now()) / 1000);
+        if (left <= 0) { res(); return; }
+        el('map-note').textContent = 'Open-Meteo free limit reached. Retrying in ' + left + ' s\u2026'; el('map-note').className = 'small muted';
+        setTimeout(tick, 1000);
+      })();
+    });
+  }
   async function fetchGrid(spec, useType, M) {
     var pts = [], j, i;
     for (j = 0; j < spec.ny; j++) for (i = 0; i < spec.nx; i++) pts.push([spec.lats[j], spec.lons[i]]);
@@ -190,9 +203,9 @@
         var arr;
         try { arr = await omFetch(url); }
         catch (e) {
-          if (e.status !== 429) throw e;
-          log('Maps: Open-Meteo asked us to slow down; waiting 20 seconds, then retrying');
-          await new Promise(function (r) { setTimeout(r, 20000); });
+          if (e.status !== 429 || /hourly|daily/i.test(e.reason || '')) throw e;
+          log('Maps: Open-Meteo per-minute limit reached; waiting 62 seconds, then retrying');
+          await rateWait(62);
           arr = await omFetch(url);
         }
         results[c] = Array.isArray(arr) ? arr : [arr];
