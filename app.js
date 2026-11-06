@@ -47,7 +47,7 @@
     set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
     del: function (k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
   };
-  var settings = Object.assign({ apiKey: '', stationId: 'KMAHOPKI22', detail: 'fine' }, store.get('wx.settings', {}));
+  var settings = Object.assign({ apiKey: '', stationId: 'KMAHOPKI22', detail: 'fine', playMs: 700 }, store.get('wx.settings', {}));
   var params = new URLSearchParams(location.search);
   var demo = params.get('demo') === '1' || store.get('wx.demo', false);
 
@@ -589,7 +589,7 @@
     ctx.stroke();
   }
   function halo(ctx, text, x, y) {
-    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(8,14,22,.8)'; ctx.lineJoin = 'round'; ctx.strokeText(text, x, y); ctx.fillText(text, x, y);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineJoin = 'round'; ctx.strokeText(text, x, y); ctx.fillText(text, x, y);
   }
   function renderMap() {
     var cv = el('map'), wrap = el('map-wrap'), d = gridData;
@@ -598,7 +598,7 @@
     var H = Math.round(W / aspect), dpr = Math.min(window.devicePixelRatio || 1, 3);
     cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#0e1621'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
     function proj(lon, lat) { return [(lon - DOM.lon0) / (DOM.lon1 - DOM.lon0) * W, (DOM.lat1 - lat) / (DOM.lat1 - DOM.lat0) * H]; }
     if (d && d.steps && d.steps.length) {
       var g = stepGrids(d, stepIdx);
@@ -607,14 +607,16 @@
       ctx.drawImage(off, 0, 0, W, H);
       geoLines(ctx, proj);
       if (view === 't2m') {
-        ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 1.6;
-        contourChains(g.t2, g.nxu, g.nyu, 32).forEach(function (ch) { pathChain(ctx, ch, g, proj); ctx.stroke(); });
+        contourChains(g.t2, g.nxu, g.nyu, 32).forEach(function (ch) {
+          pathChain(ctx, ch, g, proj); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3.4; ctx.stroke();
+          ctx.strokeStyle = '#0a2a6e'; ctx.lineWidth = 1.6; ctx.stroke();
+        });
       } else if (view !== 'apcpn' && view !== 'asnow') {
         drawPressure(ctx, g, proj);
       }
     } else {
       geoLines(ctx, proj);
-      ctx.fillStyle = '#9fb0c0'; ctx.font = '14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#5d6b79'; ctx.font = '14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
       ctx.fillText(d ? 'No forecast steps available' : (/could not/i.test(gridNote) ? 'Forecast data unavailable' : 'Loading ' + curModel().short + ' data…'), W / 2, H / 2);
     }
     cities(ctx, proj, W, H);
@@ -623,9 +625,9 @@
   }
   function geoLines(ctx, proj) {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(255,255,255,.38)'; ctx.lineWidth = 0.7; drawLines(ctx, GEO.states, proj);
-    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1; drawLines(ctx, GEO.border, proj);
-    ctx.strokeStyle = 'rgba(235,242,250,.92)'; ctx.lineWidth = 1; drawLines(ctx, GEO.coast, proj);
+    ctx.strokeStyle = 'rgba(30,38,48,.42)'; ctx.lineWidth = 0.7; drawLines(ctx, GEO.states, proj);
+    ctx.strokeStyle = 'rgba(15,20,28,.75)'; ctx.lineWidth = 1.1; drawLines(ctx, GEO.border, proj);
+    ctx.strokeStyle = 'rgba(15,20,28,.85)'; ctx.lineWidth = 1; drawLines(ctx, GEO.coast, proj);
   }
   function pathChain(ctx, ch, g, proj) {
     ctx.beginPath();
@@ -644,8 +646,8 @@
       chains.forEach(function (ch) {
         if (ch.length < 3) return;
         pathChain(ctx, ch, g, proj);
-        ctx.strokeStyle = 'rgba(5,10,18,.35)'; ctx.lineWidth = bold ? 3.4 : 2.4; ctx.stroke();
-        ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = bold ? 1.7 : 1; ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = bold ? 3.6 : 2.6; ctx.stroke();
+        ctx.strokeStyle = 'rgba(12,16,24,.92)'; ctx.lineWidth = bold ? 1.7 : 1; ctx.stroke();
         if (lev % 8 === 0) {
           var len = 0, pts = ch.map(function (q) { return proj(DOM.lon0 + q[0] * g.deg, DOM.lat0 + q[1] * g.deg); });
           for (var s = 1; s < pts.length; s++) len += Math.hypot(pts[s][0] - pts[s - 1][0], pts[s][1] - pts[s - 1][1]);
@@ -658,13 +660,13 @@
         }
       });
     }
-    ctx.font = '600 10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
+    ctx.font = '600 10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#111820';
     labels.forEach(function (L) { ctx.save(); ctx.translate(L.x, L.y); ctx.rotate(L.ang); halo(ctx, L.text, 0, 0); ctx.restore(); });
     findExtremes(g).forEach(function (e) {
       var p = proj(DOM.lon0 + e.i * g.deg, DOM.lat0 + e.j * g.deg);
-      ctx.font = '800 22px -apple-system, system-ui, sans-serif'; ctx.fillStyle = e.type === 'L' ? '#ff6b6b' : '#6bb8ff';
+      ctx.font = '800 22px -apple-system, system-ui, sans-serif'; ctx.fillStyle = e.type === 'L' ? '#d42a2a' : '#1f5fd6';
       halo(ctx, e.type, p[0], p[1]);
-      ctx.font = '600 10px -apple-system, system-ui, sans-serif'; ctx.fillStyle = '#fff'; halo(ctx, String(Math.round(e.v)), p[0], p[1] + 14);
+      ctx.font = '600 10px -apple-system, system-ui, sans-serif'; ctx.fillStyle = '#111820'; halo(ctx, String(Math.round(e.v)), p[0], p[1] + 14);
     });
     ctx.textBaseline = 'alphabetic';
   }
@@ -672,13 +674,13 @@
     ctx.font = '10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     CITIES.forEach(function (c) {
       var p = proj(c[2], c[1]); if (p[0] < 6 || p[0] > W - 40 || p[1] < 6 || p[1] > H - 6) return;
-      ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(p[0], p[1], 1.8, 0, 6.3); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,.85)'; halo(ctx, c[0], p[0] + 4, p[1]);
+      ctx.fillStyle = 'rgba(15,20,28,.9)'; ctx.beginPath(); ctx.arc(p[0], p[1], 1.8, 0, 6.3); ctx.fill();
+      ctx.fillStyle = '#18202b'; halo(ctx, c[0], p[0] + 4, p[1]);
     });
     var h = proj(HOME.lon, HOME.lat);
     ctx.fillStyle = '#ffd84d'; ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(h[0], h[1], 5, 0, 6.3); ctx.fill(); ctx.stroke();
-    ctx.font = '700 11px -apple-system, system-ui, sans-serif'; ctx.fillStyle = '#ffd84d'; ctx.textAlign = 'right'; halo(ctx, 'Home', h[0] - 8, h[1] - 6); ctx.textAlign = 'left';
+    ctx.font = '700 11px -apple-system, system-ui, sans-serif'; ctx.fillStyle = '#9a5a00'; ctx.textAlign = 'right'; halo(ctx, 'Home', h[0] - 8, h[1] - 6); ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
   }
   function drawLegend() {
@@ -736,7 +738,7 @@
     if (playTimer) { stopPlay(); return; }
     var d = gridData; if (!d || !d.steps) return;
     el('play').textContent = '❚❚'; el('play').setAttribute('aria-label', 'Pause');
-    playTimer = setInterval(function () { setStep(stepIdx >= gridData.steps.length - 1 ? 0 : stepIdx + 1); }, 550);
+    playTimer = setInterval(function () { setStep(stepIdx >= gridData.steps.length - 1 ? 0 : stepIdx + 1); }, clamp(+settings.playMs || 700, 250, 1500));
   }
   function buildModelPicker() {
     var sel = el('model'); sel.innerHTML = '';
@@ -875,13 +877,17 @@
   function openSettings() {
     el('set-key').value = settings.apiKey; el('set-station').value = settings.stationId; el('set-detail').value = settings.detail;
     el('set-demo').checked = !!demo;
+    el('set-speed').value = clamp(+settings.playMs || 700, 250, 1500); showSpeed();
     var dlg = el('settings'); if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
     el('diag-log').textContent = logLines.join('\n');
   }
+  function showSpeed() { el('speed-val').textContent = (el('set-speed').value / 1000).toFixed(2).replace(/0$/, '') + ' s per frame'; }
   function saveSettings() {
     var changedDetail = el('set-detail').value !== settings.detail;
     settings.apiKey = el('set-key').value.trim(); settings.stationId = (el('set-station').value.trim() || 'KMAHOPKI22').toUpperCase(); settings.detail = el('set-detail').value;
+    settings.playMs = +el('set-speed').value || 700;
     store.set('wx.settings', settings);
+    if (playTimer) { stopPlay(); togglePlay(); }
     var wantDemo = el('set-demo').checked, demoChanged = wantDemo !== demo;
     demo = wantDemo; store.set('wx.demo', demo);
     el('settings').close();
@@ -947,6 +953,7 @@
     el('set-save').addEventListener('click', function (e) { e.preventDefault(); saveSettings(); });
     el('set-cancel').addEventListener('click', function () { el('settings').close(); });
     el('set-check').addEventListener('click', runChecks);
+    el('set-speed').addEventListener('input', showSpeed);
     el('set-clear').addEventListener('click', async function () { await Promise.all(MODELS.map(function (m) { return idb.del('grid-' + m.id); })); await idb.del('grid'); store.del('wx.hasType'); stepCache.clear(); log('Saved model data cleared'); el('check-out').textContent = 'Saved model data cleared.'; });
     document.body.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('[data-action]'); if (!a) return;

@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 <header class="top">
@@ -93,6 +93,10 @@
       </select>
     </label>
     <p class="small muted">RRFS always uses the fine grid.</p>
+    <label>Animation speed <span id="speed-val" class="muted small"></span>
+      <input id="set-speed" type="range" min="250" max="1500" step="50">
+    </label>
+    <p class="small muted">Left is faster, right is slower.</p>
     <label class="check"><input id="set-demo" type="checkbox"> Demo mode (made-up data, for testing)</label>
     <div class="row">
       <button id="set-check" class="btn" type="button">Run checks</button>
@@ -110,7 +114,7 @@
   </form>
 </dialog>
 
-<script src="geo.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="geo.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
