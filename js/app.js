@@ -42,6 +42,7 @@ function saveSettings() {
   settings.stationId = (el('set-station').value.trim() || 'KMAHOPKI22').toUpperCase(); settings.detail = el('set-detail').value;
   settings.playMs = +el('set-speed').value || 700; settings.layout = el('set-layout').value;
   store.set('wx.settings', settings);
+  store.set('wx.wuPause', 0); // a saved key gets a fresh try with Weather Underground
   if (playTimer) { stopPlay(); togglePlay(); }
   var wantDemo = el('set-demo').checked, demoChanged = wantDemo !== demo;
   demo = wantDemo; store.set('wx.demo', demo);
@@ -197,8 +198,19 @@ function init() {
     if (a.dataset.action === 'dismiss-tip') { store.set('wx.tipDismissed', true); updateBanner(); }
   });
   var rz; window.addEventListener('resize', function () { applyLayout(); clearTimeout(rz); rz = setTimeout(function () { applyLayout(); renderAll(); }, 120); });
+  // Left open and untouched for 30 minutes, the app updates every 30 minutes instead of every minute
+  // (saves Weather Underground's daily allowance on a screen left on). Any tap, swipe or key goes back to every minute.
+  var IDLE_MS = 30 * 60000, lastActive = Date.now(), idleRunAt = 0;
+  function isIdle() { return Date.now() - lastActive > IDLE_MS; }
+  function showIdle() { var c = el('live-chip'); if (c) c.textContent = isIdle() ? 'every 30 min' : 'live'; }
+  function noteActive() {
+    var was = isIdle(); lastActive = Date.now();
+    if (was) { showIdle(); log('Back to updating every minute'); loadStation(); if (histOffset === 0) loadHistory(true); }
+  }
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) { window.addEventListener(ev, noteActive, { passive: true, capture: true }); });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'visible') return;
+    if (isIdle()) { lastActive = Date.now(); showIdle(); }
     renderDaylight();
     if (!station || Date.now() - station.fetchedAt > 60000) loadStation();
     if (histOffset === 0 && Date.now() - histFetchedAt > 240000) loadHistory(true);
@@ -209,6 +221,11 @@ function init() {
   });
   setInterval(function () {
     if (document.visibilityState !== 'visible') return;
+    if (isIdle()) {
+      if (el('live-chip').textContent === 'live') { showIdle(); log('No activity for 30 minutes: updating every 30 minutes'); idleRunAt = Date.now() + IDLE_MS; }
+      if (Date.now() < idleRunAt) return;
+      idleRunAt = Date.now() + IDLE_MS;
+    }
     renderDaylight(); loadStation(); loadAlerts(false); loadRadar(false);
     if (histOffset === 0 && Date.now() - histFetchedAt > 290000) loadHistory(true);
     if (!demo && Date.now() - gridCheckedAt > 15 * 60000) loadGrid({}).then(scheduleRender);

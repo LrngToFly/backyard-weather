@@ -87,6 +87,25 @@ function wuUrl(path, extra) {
   return WU_BASE + path + '?stationId=' + encodeURIComponent(settings.stationId) + '&format=json&units=e&numericPrecision=decimal' +
     (extra || '') + '&apiKey=' + encodeURIComponent(settings.apiKey);
 }
+// Every Weather Underground request goes through wuFetch. When Weather Underground refuses the key (usually the
+// 1,500-a-day limit), all requests pause until the allowance resets at midnight UTC (7 or 8 PM in Massachusetts),
+// so refused requests don't keep counting. Saving the key in Settings ends the pause.
+// soft: a refusal from this request doesn't pause (the hourly history can be limited on its own while the rest works).
+function wuPausedUntil() { var u = store.get('wx.wuPause', 0); return u > Date.now() ? u : 0; }
+function wuPauseMsg() {
+  return 'Weather Underground refused the key, most likely because today\'s limit of 1,500 requests was reached. ' +
+    'The app stops asking until ' + new Date(wuPausedUntil()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ', when the limit resets.';
+}
+function wuRefused(status) { return new Error(wuPausedUntil() ? wuPauseMsg() : 'Weather Underground rejected the key (HTTP ' + status + ')'); }
+async function wuFetch(path, extra, soft) {
+  if (wuPausedUntil()) { var e = new Error(wuPauseMsg()); e.paused = true; throw e; }
+  var r = await fetch(wuUrl(path, extra), { cache: 'no-store' });
+  if (!soft && (r.status === 401 || r.status === 403 || r.status === 429)) {
+    var d = new Date(); store.set('wx.wuPause', Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+    log('Weather Underground refused the key (HTTP ' + r.status + '); pausing its requests until ' + new Date(wuPausedUntil()).toLocaleTimeString());
+  }
+  return r;
+}
 
 // IndexedDB key/value store for the larger saved data (maps, station history)
 var idb = {

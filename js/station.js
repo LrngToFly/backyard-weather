@@ -9,9 +9,9 @@ async function loadStation() {
   if (demo) { station = makeDemoStation(); renderStation(); return; }
   if (!settings.apiKey) { station = null; renderStation('nokey'); return; }
   try {
-    var r = await fetch(wuUrl('observations/current'), { cache: 'no-store' });
+    var r = await wuFetch('observations/current');
     if (r.status === 204) throw new Error('No recent report from this station (HTTP 204)');
-    if (r.status === 401 || r.status === 403) throw new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
+    if (r.status === 401 || r.status === 403 || r.status === 429) throw wuRefused(r.status);
     if (!r.ok) throw new Error('Weather Underground HTTP ' + r.status);
     var j = await r.json();
     var o = j.observations && j.observations[0];
@@ -46,7 +46,7 @@ function renderStation(state, msg) {
   if (s.temp >= 80 && s.heatIndex != null) feels = s.heatIndex; else if (s.temp <= 50 && s.windChill != null) feels = s.windChill;
   var age = Math.max(0, Math.round((Date.now() - s.epoch) / 60000));
   var ageTxt = age < 1 ? 'just now' : age < 60 ? age + ' min ago' : Math.round(age / 60) + ' h ago';
-  var stale = age > 30;
+  var stale = age > 45;
   box.innerHTML =
     '<div class="hero"><div class="big">' + fmt(s.temp, 1) + '<small>°F</small></div><div class="hero-side"><div>Feels like ' + fmt(feels, 0) + '°</div>' +
     '<div id="hilo" class="hilo"></div>' +
@@ -102,7 +102,7 @@ async function loadDailySummaries(force) {
   var last = store.get('wx.sumAt', 0);
   if (!force && Date.now() - last < 3 * 3600000) return;
   try {
-    var r = await fetch(wuUrl('dailysummary/7day'), { cache: 'no-store' });
+    var r = await wuFetch('dailysummary/7day');
     if (r.status === 204) return;
     if (!r.ok) throw new Error('Weather Underground HTTP ' + r.status);
     var j = await r.json(), today = ymd(dayStart(0)), n = 0;
@@ -137,7 +137,7 @@ async function ensureObsRange(from, to, maxReq) {
   for (var k = 0; k < months.length; k++) {
     if (made >= (maxReq || 20) || cnt.n >= 60) break;
     if (made) await sleep(2500);
-    var r = await fetch(wuUrl('history/daily', '&startDate=' + months[k][0] + '&endDate=' + months[k][1]), { cache: 'no-store' });
+    var r = await wuFetch('history/daily', '&startDate=' + months[k][0] + '&endDate=' + months[k][1]);
     made++; cnt.n++; store.set('wx.histReq', cnt);
     if (!r.ok && r.status !== 204) { log('Station history fill-in stopped: Weather Underground HTTP ' + r.status); break; }
     var got = {};
@@ -261,9 +261,9 @@ async function loadDay(force, quiet, off) {
   if (away()) return;
   if (c && !force && (off > 0 || Date.now() - c.fetchedAt < 240000)) { if (off === 0) histFetchedAt = c.fetchedAt; show(c); return; }
   try {
-    var r = await fetch(wuUrl('history/all', '&date=' + ds), { cache: 'no-store' });
+    var r = await wuFetch('history/all', '&date=' + ds);
     if (r.status === 204) { show({ kind: '5min', ds: ds, t0: t0, t1: t1, rows: [], fetchedAt: Date.now() }); if (!quiet) { histMsg = 'No readings reported for this day.'; renderHistory(); } return; }
-    if (r.status === 401 || r.status === 403) throw new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
+    if (r.status === 401 || r.status === 403 || r.status === 429) throw wuRefused(r.status);
     if (!r.ok) throw new Error('Weather Underground HTTP ' + r.status);
     var j = await r.json(), rows = parseObsRows(j.observations);
     var h = { kind: '5min', ds: ds, t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
@@ -281,14 +281,13 @@ async function loadDay(force, quiet, off) {
 }
 // the last 7 days, hourly, in one request (kept for 10 minutes)
 // Weather Underground request that also says whether the key is being throttled (it answers 401 "API key is throttled")
-async function wuGet(path, extra) {
-  var r = await fetch(wuUrl(path, extra), { cache: 'no-store' }), txt = r.status === 204 ? '' : await r.text(), body = null;
+async function wuGet(path, extra, soft) {
+  var r = await wuFetch(path, extra, soft), txt = r.status === 204 ? '' : await r.text(), body = null;
   try { body = txt ? JSON.parse(txt) : null; } catch (e) { /* not JSON */ }
   return { status: r.status, ok: r.ok, body: body, throttled: r.status === 429 || /throttl/i.test(txt) };
 }
 function wuFail(r) {
-  if (r.throttled) return new Error('Weather Underground is temporarily limiting requests for your key; try again in a while');
-  if (r.status === 401 || r.status === 403) return new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
+  if (r.status === 401 || r.status === 403 || r.status === 429) return wuRefused(r.status);
   return new Error('Weather Underground HTTP ' + r.status);
 }
 // This week: the last-7-days hourly feed. Past weeks: the hourly history for the week (one request); if Weather Underground
@@ -300,7 +299,7 @@ async function fetchWeekRows(b, key, cur, t0) {
     if (!r0.ok && r0.status !== 204) throw wuFail(r0);
     return obs(r0).filter(function (x) { return x.t >= t0; });
   }
-  var r = await wuGet('history/hourly', '&startDate=' + key + '&endDate=' + ymd(b.last));
+  var r = await wuGet('history/hourly', '&startDate=' + key + '&endDate=' + ymd(b.last), true);
   if (r.ok || r.status === 204) return obs(r);
   if (!r.throttled && r.status !== 401) throw wuFail(r);
   log('Hourly history is limited right now; building the week of ' + key + ' from 5-minute readings');
