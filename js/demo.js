@@ -70,7 +70,8 @@ function makeDemoObs() {
   var o = {}, jan1 = ymd(new Date(new Date().getFullYear(), 0, 1));
   for (var i = 1; i <= 366; i++) {
     var ds = ymd(dayStart(i)); if (ds < jan1 && i > 62) break;
-    o[ds] = { hi: 55 + 10 * Math.sin(i / 9), lo: 38 + 8 * Math.sin(i / 9 + 0.4), rain: i % 4 === 0 ? +(0.1 + 0.3 * Math.abs(Math.sin(i))).toFixed(2) : 0 };
+    var hi = 55 + 10 * Math.sin(i / 9) - i * 0.05, lo = 38 + 8 * Math.sin(i / 9 + 0.4) - i * 0.05, w = 8 + 6 * Math.abs(Math.sin(i * 1.7)), p = 30.0 + 0.3 * Math.sin(i / 3.1);
+    o[ds] = { v: 2, hi: hi, lo: lo, rain: i % 4 === 0 ? +(0.1 + 0.3 * Math.abs(Math.sin(i))).toFixed(2) : 0, dew: lo - 2 + 4 * Math.sin(i / 5), wmax: w, gust: w + 6 + 4 * Math.abs(Math.sin(i)), pmax: p + 0.12, pmin: p - 0.12 };
   }
   return o;
 }
@@ -90,4 +91,16 @@ function makeDemoScore() {
     SCORE_LEADS.forEach(function (n, k) { var e = errs[m.id][k]; lead[n] = { hi: e + 0.2, lo: e - 0.2, both: e, biasHi: m.id === 'gfs' ? -1.4 : 0.6, biasLo: m.id === 'ecmwf' ? 0.9 : -0.3, n: 30, rain: rainPct[k], rainTotal: rainTot, rainN: 30 }; });
     return { id: m.id, label: m.label, lead: lead };
   }) };
+}
+// hourly readings for the last 7 days (Week view)
+function makeDemoWeek(t0, t1) {
+  var rows = [], carried = 0, day = '', acc = 0;
+  for (var t = Math.ceil(t0 / 3600) * 3600; t <= t1; t += 3600) {
+    var hr = t / 3600, d = ymd(new Date(t * 1000));
+    if (d !== day) { carried += acc; acc = 0; day = d; }
+    var rate = Math.max(0, Math.sin(hr / 9) * Math.sin(hr / 4) - 0.6) * 0.4; acc += rate;
+    var tc = 50 + 9 * Math.sin((hr % 24 - 9) / 24 * 6.283) + 4 * Math.sin(hr / 40), ws = Math.max(0, 5 + 4 * Math.sin(hr / 7));
+    rows.push({ t: t, temp: +tc.toFixed(1), dew: +(tc - 8 + 3 * Math.sin(hr / 11)).toFixed(1), wind: +ws.toFixed(1), gust: +(ws + 4 + 3 * Math.abs(Math.sin(hr))).toFixed(1), rate: +rate.toFixed(2), acc: +(carried + acc).toFixed(2), pres: +(29.9 + 0.2 * Math.sin(hr / 30)).toFixed(2) });
+  }
+  return { kind: 'hourly', t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
 }

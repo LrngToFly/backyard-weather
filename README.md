@@ -20,7 +20,7 @@ Not for safety-critical decisions.
 - **Forecast maps** (Euro, GFS, EC-AIFS, AIGFS, RRFS): MSLP & precip, Rain / Frozen, total precip, total snow (10:1 or Kuchera ratio), 2m temp, 2m dewpoint, 10m wind. Time slider and play button. The note under the map names the model run (for example "18z run").
 - **Forecast at your backyard**: 7-day chart and table with a Euro / GFS / AI Euro / AI GFS selector. Tap the chart to read it.
 - **Model scorecard**: how far off each model's daily highs and lows were at your station, 1, 3 and 5 days ahead, over the last 30 days, and whether each one runs warm or cold. A Rain view shows how often each model called rain days and dry days right (0.05 in or more counts as rain) and its 30-day rain total next to your gauge's. Uses Open-Meteo's archive of past forecasts, so it works even if the app wasn't opened on those days.
-- **Station charts**: temperature & dew point, wind & gust, precipitation, pressure. Tap or slide to read values, tap again to hide.
+- **Station charts**: temperature & dew point, wind & gust, precipitation, pressure, with a Day / Week / Month / YTD switch. Day is 5-minute readings (step back up to 14 days), Week is hourly readings for the last 7 days, and Month (last 30 days) and YTD show one point per day: high/low band, peak gust, daily rain with a running total, and the pressure range. Tap or slide to read values, tap again to hide.
 - **Models on Tropical Tidbits**: one-tap links to the matching Tropical Tidbits page for any model and map.
 - Phone and iPad layouts (automatic, or choose in Settings).
 

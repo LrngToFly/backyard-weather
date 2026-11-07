@@ -1,5 +1,5 @@
 /* Backyard Weather: the Weather Underground station. Live readings, today's high and low, rain totals
-   (7 days, month, year), 5-minute day charts, and the daily summaries the model scorecard compares against. */
+   (7 days, month, year), station charts by day, week, month and year, and the daily summaries the model scorecard compares against. */
 'use strict';
 
 var station = null;
@@ -89,7 +89,12 @@ function saveObs() {
   Object.keys(obsDays).forEach(function (k) { if (k < cut) delete obsDays[k]; });
   idb.set('obs-' + settings.stationId, { days: obsDays });
 }
-function obsFromImperial(im) { return { hi: num(im.tempHigh), lo: num(im.tempLow), rain: num(im.precipTotal) }; }
+// v: 2 = also has dew point, wind, gust and pressure (for the month and year charts)
+function obsFromImperial(im) {
+  return { v: 2, hi: num(im.tempHigh), lo: num(im.tempLow), rain: num(im.precipTotal), dew: num(im.dewptAvg, im.dewpt), wmax: num(im.windspeedHigh),
+    gust: num(im.windgustHigh), pmax: num(im.pressureMax), pmin: num(im.pressureMin) };
+}
+function needsObs(o) { return !o || (!o.none && o.v !== 2); }
 // last 7 days in one request (at most every 3 hours)
 async function loadDailySummaries(force) {
   if (demo || !settings.apiKey) return;
@@ -119,7 +124,10 @@ async function backfillObs() {
   try {
     await loadObsStore();
     var need = [], jan1 = ymd(new Date(new Date().getFullYear(), 0, 1));
-    for (var i = 1; i <= 400; i++) { var ds = ymd(dayStart(i)); if (i > 62 && ds < jan1) break; if (!obsDays[ds]) need.push(ds); }
+    // days not loaded yet first, then days saved before dew point, wind and pressure were kept
+    var later = [];
+    for (var i = 1; i <= 400; i++) { var ds = ymd(dayStart(i)); if (i > 62 && ds < jan1) break; if (!obsDays[ds]) need.push(ds); else if (needsObs(obsDays[ds])) later.push(ds); }
+    need = need.concat(later);
     backfillLeft = need.length;
     var today = ymd(dayStart(0)), cnt = store.get('wx.bfCount', { day: '', n: 0 });
     if (cnt.day !== today) cnt = { day: today, n: 0 };
@@ -135,12 +143,12 @@ async function backfillObs() {
         obsDays[need[k]] = o ? obsFromImperial(o.imperial || {}) : { none: true };
       }
       backfillLeft--;
-      if (session % 5 === 0) { saveObs(); renderRainTotals(); renderScore(); }
+      if (session % 5 === 0) { saveObs(); renderRainTotals(); renderScore(); refreshDailyCharts(); }
       await sleep(2500);
     }
     if (session) { saveObs(); log('Station history fill-in: ' + session + ' days loaded, ' + backfillLeft + ' still to go'); }
   } catch (e) { log('Station history fill-in error: ' + friendlyError(e)); }
-  finally { backfilling = false; renderRainTotals(); renderScore(); }
+  finally { backfilling = false; renderRainTotals(); renderScore(); refreshDailyCharts(); }
 }
 function renderRainTotals() {
   var box = el('rain-tot'); if (!box) return;
@@ -160,8 +168,13 @@ function renderRainTotals() {
     (anyMiss ? '<p class="small muted">* Still loading past days from Weather Underground (' + Math.max(miss.y, miss.w) + ' to go); totals fill in over the next few visits.</p>' : '');
 }
 
-// ---------------------------------------------------------------- 5-minute day charts (history kept for 14 days)
+// ---------------------------------------------------------------- station charts: Day (5-minute), Week (hourly), Month and YTD (daily)
+// Day: one day of 5-minute readings (past days kept for 14 days). Week: the last 7 days of hourly readings, one request.
+// Month (last 30 days) and YTD: one point per day from the daily summaries the rain totals and scorecard also use.
 var hist = null, histOffset = 0, histFetchedAt = 0, histCache = {}, histMsg = 'Loading…', hoverT = null;
+var histRange = store.get('wx.histrange', 'day');
+if (['day', 'week', 'month', 'ytd'].indexOf(histRange) < 0) histRange = 'day';
+var weekCache = null;
 function histKey(ds) { return 'hist-' + settings.stationId + '-' + ds; }
 var histPruned = false;
 async function pruneHist() {
@@ -169,55 +182,162 @@ async function pruneHist() {
   var cut = ymd(dayStart(HIST_KEEP_DAYS)), keys = await idb.keys();
   keys.forEach(function (k) { var m = /^hist-.*-(\d{8})$/.exec(k); if (m && m[1] < cut) idb.del(k); });
 }
+// rows from Weather Underground history/all or hourly/7day observations
+function parseObsRows(obs) {
+  var rows = [];
+  (obs || []).forEach(function (o) {
+    var im = o.imperial || {}, t = o.epoch || (o.obsTimeUtc ? Date.parse(o.obsTimeUtc) / 1000 : null);
+    if (!t) return;
+    rows.push({
+      t: t, temp: num(im.tempAvg, im.temp, im.tempHigh), dew: num(im.dewptAvg, im.dewpt, im.dewptHigh),
+      wind: num(im.windspeedAvg, im.windSpeed, im.windspeedHigh), gust: num(im.windgustHigh, im.windgustAvg, im.windGust),
+      rate: num(im.precipRate), acc: num(im.precipTotal),
+      pres: (im.pressureMax != null && im.pressureMin != null && !isNaN(im.pressureMax) && !isNaN(im.pressureMin)) ? (+im.pressureMax + +im.pressureMin) / 2 : num(im.pressureMax, im.pressureMin, im.pressure)
+    });
+  });
+  rows.sort(function (a, b) { return a.t - b.t; });
+  return rows;
+}
+function rangeLabel() {
+  return histRange === 'week' ? 'Last 7 days' : histRange === 'month' ? 'Last 30 days' : histRange === 'ytd' ? new Date().getFullYear() + ' to date' : '';
+}
 async function loadHistory(force) {
-  var day = dayStart(histOffset), ds = ymd(day), t0 = day.getTime() / 1000, t1 = dayStart(histOffset - 1).getTime() / 1000;
-  var label = histOffset === 0 ? 'Today' : histOffset === 1 ? 'Yesterday' : day.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
-  el('day-label').textContent = label + (histOffset <= 1 ? ' · ' + day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : '');
-  el('day-next').disabled = histOffset === 0; el('day-prev').disabled = histOffset >= HIST_KEEP_DAYS;
-  histMsg = '';
-  if (demo) { hist = makeDemoHistory(day, t0, t1); histCache[ds] = hist; histFetchedAt = Date.now(); renderHistory(); renderHiLo(); return; }
-  if (!settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
+  el('day-prev').hidden = el('day-next').hidden = histRange !== 'day';
+  el('hist-chip').textContent = histRange === 'day' ? '5-min' : histRange === 'week' ? 'hourly' : 'daily';
+  if (histRange !== 'day') {
+    el('day-label').textContent = rangeLabel();
+    await loadDay(force, true, 0); // today's 5-minute readings: the high/low and the latest point
+    if (histRange === 'week') return loadWeek(force);
+    return loadDaily();
+  }
+  return loadDay(force, false, histOffset);
+}
+// quiet: load (and cache) a day without showing it, e.g. today while the Week, Month or YTD view is up
+async function loadDay(force, quiet, off) {
+  var day = dayStart(off), ds = ymd(day), t0 = day.getTime() / 1000, t1 = dayStart(off - 1).getTime() / 1000;
+  function away() { return !quiet && (histRange !== 'day' || histOffset !== off); } // switched to another day or view while loading
+  if (!quiet) {
+    var label = off === 0 ? 'Today' : off === 1 ? 'Yesterday' : day.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+    el('day-label').textContent = label + (off <= 1 ? ' · ' + day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : '');
+    el('day-next').disabled = off === 0; el('day-prev').disabled = off >= HIST_KEEP_DAYS;
+    histMsg = '';
+  }
+  function show(h) { if (!quiet) { hist = h; renderHistory(); } }
+  if (demo) { var dh = makeDemoHistory(day, t0, t1); dh.kind = '5min'; histCache[ds] = dh; histFetchedAt = Date.now(); show(dh); renderHiLo(); return; }
+  if (!settings.apiKey) { if (!quiet) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); } return; }
   var c = histCache[ds];
-  if (!c && histOffset > 0) { c = await idb.get(histKey(ds)); if (c) histCache[ds] = c; }
-  if (ds !== ymd(dayStart(histOffset))) return; // day changed while loading
-  if (c && !force && (histOffset > 0 || Date.now() - c.fetchedAt < 240000)) { hist = c; histFetchedAt = c.fetchedAt; renderHistory(); return; }
+  if (!c && off > 0) { c = await idb.get(histKey(ds)); if (c) { c.kind = '5min'; histCache[ds] = c; } }
+  if (away()) return;
+  if (c && !force && (off > 0 || Date.now() - c.fetchedAt < 240000)) { if (off === 0) histFetchedAt = c.fetchedAt; show(c); return; }
   try {
     var r = await fetch(wuUrl('history/all', '&date=' + ds), { cache: 'no-store' });
-    if (ds !== ymd(dayStart(histOffset))) return;
-    if (r.status === 204) { hist = { ds: ds, t0: t0, t1: t1, rows: [], fetchedAt: Date.now() }; histMsg = 'No readings reported for this day.'; renderHistory(); return; }
+    if (r.status === 204) { show({ kind: '5min', ds: ds, t0: t0, t1: t1, rows: [], fetchedAt: Date.now() }); if (!quiet) { histMsg = 'No readings reported for this day.'; renderHistory(); } return; }
     if (r.status === 401 || r.status === 403) throw new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
     if (!r.ok) throw new Error('Weather Underground HTTP ' + r.status);
-    var j = await r.json(), obs = j.observations || [], rows = [];
-    obs.forEach(function (o) {
-      var im = o.imperial || {}, t = o.epoch || (o.obsTimeUtc ? Date.parse(o.obsTimeUtc) / 1000 : null);
-      if (!t) return;
-      rows.push({
-        t: t, temp: num(im.tempAvg, im.temp, im.tempHigh), dew: num(im.dewptAvg, im.dewpt, im.dewptHigh),
-        wind: num(im.windspeedAvg, im.windSpeed, im.windspeedHigh), gust: num(im.windgustHigh, im.windgustAvg, im.windGust),
-        rate: num(im.precipRate), acc: num(im.precipTotal),
-        pres: (im.pressureMax != null && im.pressureMin != null && !isNaN(im.pressureMax) && !isNaN(im.pressureMin)) ? (+im.pressureMax + +im.pressureMin) / 2 : num(im.pressureMax, im.pressureMin, im.pressure)
-      });
-    });
-    rows.sort(function (a, b) { return a.t - b.t; });
-    hist = { ds: ds, t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
-    histCache[ds] = hist; histFetchedAt = hist.fetchedAt;
-    if (histOffset > 0 && rows.length) { idb.set(histKey(ds), hist); pruneHist(); summarizeDay(ds, rows); }
+    var j = await r.json(), rows = parseObsRows(j.observations);
+    var h = { kind: '5min', ds: ds, t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
+    histCache[ds] = h; if (off === 0) histFetchedAt = h.fetchedAt;
+    if (off > 0 && rows.length) { idb.set(histKey(ds), h); pruneHist(); summarizeDay(ds, rows); }
     log('Station history ' + ds + ': ' + rows.length + ' readings');
-    if (!rows.length) histMsg = 'No readings reported for this day.';
+    if (!quiet && !rows.length) histMsg = 'No readings reported for this day.';
+    if (away()) return;
+    show(h);
   } catch (e) {
     log('Station history error: ' + friendlyError(e));
-    hist = c || null; histMsg = 'Could not load station charts: ' + friendlyError(e);
+    if (!quiet) { hist = c || null; histMsg = 'Could not load station charts: ' + friendlyError(e); renderHistory(); }
+  }
+  if (off === 0) renderHiLo();
+}
+// the last 7 days, hourly, in one request (kept for 10 minutes)
+async function loadWeek(force) {
+  var t1 = Date.now() / 1000, t0 = dayStart(7).getTime() / 1000;
+  histMsg = '';
+  if (demo) { hist = makeDemoWeek(t0, t1); renderHistory(); return; }
+  if (!settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
+  if (weekCache && Date.now() - weekCache.fetchedAt < (force ? 60000 : 600000)) { hist = weekCache; renderHistory(); return; }
+  try {
+    var r = await fetch(wuUrl('observations/hourly/7day'), { cache: 'no-store' });
+    if (r.status === 401 || r.status === 403) throw new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
+    if (!r.ok && r.status !== 204) throw new Error('Weather Underground HTTP ' + r.status);
+    var rows = r.status === 204 ? [] : parseObsRows((await r.json()).observations);
+    // rain: Weather Underground's total restarts each midnight, so carry it on into a 7-day total
+    var carried = 0, dayTot = 0, lastDay = '';
+    rows.forEach(function (x) {
+      var d = ymd(new Date(x.t * 1000));
+      if (d !== lastDay) { carried += dayTot; dayTot = 0; lastDay = d; }
+      if (x.acc !== null) dayTot = Math.max(dayTot, x.acc);
+      x.acc = x.acc === null ? null : carried + x.acc;
+    });
+    weekCache = { kind: 'hourly', t0: rows.length ? Math.min(t0, rows[0].t) : t0, t1: t1, rows: rows, fetchedAt: Date.now() };
+    log('Station week: ' + rows.length + ' hourly readings');
+    if (histRange !== 'week') return;
+    hist = weekCache; if (!rows.length) histMsg = 'No readings reported this week.';
+  } catch (e) {
+    log('Station week error: ' + friendlyError(e));
+    if (histRange !== 'week') return;
+    hist = weekCache; histMsg = 'Could not load the week: ' + friendlyError(e);
   }
   renderHistory();
-  if (histOffset === 0) renderHiLo();
 }
-// a full past day of 5-minute readings also gives that day's high, low and rain for free
+// one point per day (at midday), from the saved daily summaries plus today so far
+function dayRow(ds, o) {
+  var d = dsDate(ds);
+  return { t: d.getTime() / 1000 + 43200, ds: ds, hi: o.hi, lo: o.lo, dew: o.dew != null ? o.dew : null, wmax: o.wmax != null ? o.wmax : null, gust: o.gust != null ? o.gust : null,
+    rain: o.rain, pmax: o.pmax != null ? o.pmax : null, pmin: o.pmin != null ? o.pmin : null };
+}
+function summarizeRows(rows) {
+  var o = { v: 2, hi: -Infinity, lo: Infinity, rain: 0, dew: null, wmax: null, gust: null, pmax: null, pmin: null }, ds = 0, dn = 0;
+  rows.forEach(function (r) {
+    if (r.temp !== null) { o.hi = Math.max(o.hi, r.temp); o.lo = Math.min(o.lo, r.temp); }
+    if (r.acc !== null) o.rain = Math.max(o.rain, r.acc);
+    if (r.dew !== null) { ds += r.dew; dn++; }
+    if (r.wind !== null) o.wmax = Math.max(o.wmax === null ? 0 : o.wmax, r.wind);
+    if (r.gust !== null) o.gust = Math.max(o.gust === null ? 0 : o.gust, r.gust);
+    if (r.pres !== null) { o.pmax = o.pmax === null ? r.pres : Math.max(o.pmax, r.pres); o.pmin = o.pmin === null ? r.pres : Math.min(o.pmin, r.pres); }
+  });
+  if (o.hi === -Infinity) return null;
+  o.dew = dn ? ds / dn : null;
+  return o;
+}
+async function loadDaily() {
+  histMsg = '';
+  if (!demo && !settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
+  await loadObsStore();
+  if (histRange !== 'month' && histRange !== 'ytd') return;
+  var first = histRange === 'month' ? dayStart(29) : new Date(new Date().getFullYear(), 0, 1), today = ymd(dayStart(0)), rows = [], missing = 0, partial = 0, acc = 0;
+  for (var d = new Date(first); ymd(d) <= today; d.setDate(d.getDate() + 1)) {
+    var ds = ymd(d), o = ds === today ? (histCache[ds] && summarizeRows(histCache[ds].rows)) : obsDays[ds];
+    if (!o) { missing++; continue; }
+    if (o.none) continue;
+    if (o.v !== 2) partial++;
+    var row = dayRow(ds, o);
+    if (row.rain != null) acc += row.rain;
+    row.acc = acc; rows.push(row);
+  }
+  hist = { kind: 'daily', t0: first.getTime() / 1000, t1: dayStart(-1).getTime() / 1000, rows: rows, fetchedAt: Date.now() };
+  if (missing || partial) histMsg = (missing ? missing + ' day' + (missing === 1 ? '' : 's') + ' not loaded yet' : '') + (missing && partial ? '; ' : '') +
+    (partial ? partial + ' day' + (partial === 1 ? '' : 's') + ' still need dew point, wind and pressure' : '') + '. Past days load from Weather Underground a few at a time over the next few visits.';
+  renderHistory();
+}
+function refreshDailyCharts() { if (histRange === 'month' || histRange === 'ytd') loadDaily(); }
+function buildRangeSeg() {
+  var box = el('hist-range'); box.innerHTML = '';
+  [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['ytd', 'YTD']].forEach(function (o) {
+    var b = mkEl('button', 'tab' + (histRange === o[0] ? ' on' : ''), o[1]); b.type = 'button';
+    b.addEventListener('click', function () {
+      if (histRange === o[0]) return;
+      histRange = o[0]; store.set('wx.histrange', histRange); hoverT = null; buildRangeSeg();
+      hist = null; histMsg = 'Loading…'; renderHistory();
+      loadHistory(false);
+    });
+    box.appendChild(b);
+  });
+}
+// a full past day of 5-minute readings also gives that day's summary for free
 async function summarizeDay(ds, rows) {
-  await loadObsStore(); if (obsDays[ds]) return;
-  var hi = -Infinity, lo = Infinity, rain = 0;
-  rows.forEach(function (r) { if (r.temp !== null) { hi = Math.max(hi, r.temp); lo = Math.min(lo, r.temp); } if (r.acc !== null) rain = Math.max(rain, r.acc); });
-  if (hi === -Infinity) return;
-  obsDays[ds] = { hi: hi, lo: lo, rain: rain }; saveObs();
+  await loadObsStore(); if (!needsObs(obsDays[ds])) return;
+  var o = summarizeRows(rows); if (!o) return;
+  obsDays[ds] = o; saveObs();
 }
 function niceTicks(lo, hi, n) {
   var span = Math.max(hi - lo, 1e-6), raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag;
@@ -227,7 +347,7 @@ function niceTicks(lo, hi, n) {
   return out;
 }
 function hourLabel(h) { var m = h % 24, ap = (m < 12) ? 'AM' : 'PM'; return (m % 12 === 0 ? 12 : m % 12) + ap; }
-// chart definitions: which series sit on which chart
+// chart definitions: which series sit on which chart. 5-minute and hourly readings share one set; daily summaries have their own.
 var HCHARTS = [
   { id: 'h-temp', zero: false, freeze: true, dp: 1, series: [
     { key: 'temp', name: 'Temperature', unit: '°F', color: '#a84a3e', type: 'line' }, { key: 'dew', name: 'Dew Point', unit: '°F', color: '#7f9f5e', type: 'line' }] },
@@ -238,14 +358,34 @@ var HCHARTS = [
   { id: 'h-pres', zero: false, pad: 0.012, minSpan: 0.08, dp: 2, series: [
     { key: 'pres', name: 'Pressure', unit: ' in', color: 'text', type: 'line', dp: 2 }] }
 ];
+var DCHARTS = [
+  { id: 'h-temp', zero: false, freeze: true, dp: 1, series: [
+    { band: ['lo', 'hi'], color: '#a84a3e' },
+    { key: 'hi', name: 'High', unit: '°F', color: '#a84a3e', type: 'line' }, { key: 'lo', name: 'Low', unit: '°F', color: '#4f7bc4', type: 'line' },
+    { key: 'dew', name: 'Dew Point (avg)', unit: '°F', color: '#7f9f5e', type: 'line' }] },
+  { id: 'h-wind', zero: true, dp: 1, series: [
+    { key: 'wmax', name: 'Highest Wind', unit: ' mph', color: '#4054a8', type: 'line' }, { key: 'gust', name: 'Peak Gust', unit: ' mph', color: '#d19a55', type: 'dots' }] },
+  { id: 'h-rain', zero: true, dp: 2, minMax: 0.4, series: [
+    { key: 'rain', name: 'Rain That Day', unit: ' in', color: '#7f9f5e', type: 'bars', dp: 2 }, { key: 'acc', name: 'Running Total', unit: ' in', color: '#7ba3d8', type: 'line', dp: 2 }] },
+  { id: 'h-pres', zero: false, pad: 0.012, minSpan: 0.08, dp: 2, series: [
+    { band: ['pmin', 'pmax'], color: 'text' },
+    { key: 'pmax', name: 'Highest', unit: ' in', color: 'text', type: 'line', dp: 2 }, { key: 'pmin', name: 'Lowest', unit: ' in', color: '#8a96a3', type: 'line', dp: 2 }] }
+];
+function chartSet() { return hist && hist.kind === 'daily' ? DCHARTS : HCHARTS; }
 function drawHChart(cfg) {
   var cv = el(cfg.id), W = Math.floor(cv.parentNode.getBoundingClientRect().width) || 320, H = clamp(Math.round(W * 0.46), 160, 230);
   var ctx = sizeCanvas(cv, W, H); ctx.clearRect(0, 0, W, H);
   var css = getComputedStyle(document.documentElement), tc = css.getPropertyValue('--muted').trim() || '#667', line = css.getPropertyValue('--line').trim() || '#ddd', tcol = css.getPropertyValue('--text').trim() || '#111';
   var scol = function (s) { return s.color === 'text' ? tcol : s.color; };
-  var d = hist, rows = d ? d.rows : [], t0 = d ? d.t0 : dayStart(histOffset).getTime() / 1000, t1 = d ? d.t1 : t0 + 86400;
+  var d = hist, kind = d ? d.kind || '5min' : (histRange === 'day' ? '5min' : histRange === 'week' ? 'hourly' : 'daily'), rows = d ? d.rows : [];
+  var t0 = d ? d.t0 : dayStart(histOffset).getTime() / 1000, t1 = d ? d.t1 : t0 + 86400;
+  var gap = kind === '5min' ? 1500 : kind === 'hourly' ? 3 * 3600 + 60 : 1.6 * 86400;
   var lo = Infinity, hi = -Infinity;
-  rows.forEach(function (r) { cfg.series.forEach(function (s) { var v = r[s.key]; if (v !== null && v !== undefined) { if (v < lo) lo = v; if (v > hi) hi = v; } }); });
+  rows.forEach(function (r) {
+    cfg.series.forEach(function (s) {
+      (s.band || [s.key]).forEach(function (k) { var v = r[k]; if (v !== null && v !== undefined) { if (v < lo) lo = v; if (v > hi) hi = v; } });
+    });
+  });
   if (lo === Infinity) { lo = cfg.zero ? 0 : 30; hi = cfg.zero ? 1 : 60; }
   if (cfg.zero) lo = 0;
   if (cfg.minMax) hi = Math.max(hi, cfg.minMax);
@@ -255,28 +395,53 @@ function drawHChart(cfg) {
   var L = cfg.id === 'h-pres' ? 44 : 34, R = 10, T = 8, B = 22, pw = W - L - R, ph = H - T - B;
   function X(t) { return L + (t - t0) / (t1 - t0) * pw; }
   function Y(v) { return T + (1 - (v - lo) / (hi - lo)) * ph; }
-  // shaded hour stripes
+  // shaded stripes: every other hour (day), day (week), week (month) or month (year)
   ctx.fillStyle = tcol; ctx.globalAlpha = 0.055;
-  for (var hh = 1; hh < 24; hh += 2) ctx.fillRect(X(t0 + hh * 3600), T, pw / 24, ph);
+  if (kind === '5min') { for (var hh = 1; hh < 24; hh += 2) ctx.fillRect(X(t0 + hh * 3600), T, pw / 24, ph); }
+  else if (kind === 'hourly') { for (var sd = new Date(t0 * 1000), k1 = 0; sd.getTime() / 1000 < t1; sd.setDate(sd.getDate() + 1), k1++) { if (k1 % 2) { var a1 = Math.max(t0, sd.getTime() / 1000); var nd = new Date(sd); nd.setDate(nd.getDate() + 1); ctx.fillRect(X(a1), T, X(Math.min(t1, nd.getTime() / 1000)) - X(a1), ph); } } }
+  else if (histRange === 'month') { for (var wk = t0 + 7 * 86400; wk < t1; wk += 14 * 86400) ctx.fillRect(X(wk), T, X(Math.min(t1, wk + 7 * 86400)) - X(wk), ph); }
+  else { for (var mo = 1; mo < 12; mo += 2) { var ms = new Date(new Date(t0 * 1000).getFullYear(), mo, 1).getTime() / 1000, me = new Date(new Date(t0 * 1000).getFullYear(), mo + 1, 1).getTime() / 1000; if (ms < t1) ctx.fillRect(X(ms), T, X(Math.min(t1, me)) - X(ms), ph); } }
   ctx.globalAlpha = 1;
   ctx.font = '11px -apple-system, system-ui, sans-serif'; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
   var tdp = cfg.id === 'h-pres' ? 2 : 0;
   ticks.forEach(function (v) { ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(W - R, Y(v)); ctx.stroke(); ctx.fillStyle = tc; ctx.fillText(tdp ? v.toFixed(tdp) : String(v), L - 5, Y(v)); });
-  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  var step = W < 480 ? 6 : 3;
-  for (var h2 = 0; h2 <= 24; h2 += step) { var tx = clamp(X(t0 + h2 * 3600), L + 12, W - R - 12); ctx.fillStyle = tc; ctx.fillText(hourLabel(h2), tx, H - 6); }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = tc;
+  // time labels along the bottom
+  function lab(t, text) { ctx.fillText(text, clamp(X(t), L + 14, W - R - 14), H - 6); }
+  if (kind === '5min') { var step = W < 480 ? 6 : 3; for (var h2 = 0; h2 <= 24; h2 += step) lab(t0 + h2 * 3600, hourLabel(h2)); }
+  else if (kind === 'hourly') { for (var dd = new Date(t0 * 1000); dd.getTime() / 1000 < t1; dd.setDate(dd.getDate() + 1)) { var mid1 = dd.getTime() / 1000 + 43200; if (mid1 < t1) lab(mid1, dd.toLocaleDateString([], { weekday: 'short' })); } }
+  else if (histRange === 'month') { var every = W < 480 ? 7 : 5; for (var md = new Date(t0 * 1000), k2 = 0; md.getTime() / 1000 < t1; md.setDate(md.getDate() + 1), k2++) if (k2 % every === 0) lab(md.getTime() / 1000 + 43200, md.toLocaleDateString([], { month: 'short', day: 'numeric' })); }
+  else { var y0 = new Date(t0 * 1000).getFullYear(), each = W < 480 ? 2 : 1; for (var m3 = 0; m3 < 12; m3 += each) { var mt = new Date(y0, m3, 1).getTime() / 1000; if (mt < t1) lab(mt + 15 * 86400 > t1 ? mt : mt + 15 * 86400, new Date(y0, m3, 1).toLocaleDateString([], { month: 'short' })); } }
   if (cfg.freeze && lo < 32 && hi > 32) { ctx.strokeStyle = '#1a4fb8'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(L, Y(32)); ctx.lineTo(W - R, Y(32)); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#1a4fb8'; ctx.textAlign = 'left'; ctx.fillText('32°', L + 3, Y(32) - 3); }
   ctx.save(); ctx.beginPath(); ctx.rect(L, T - 2, pw, ph + 4); ctx.clip();
+  var dayW = pw / Math.max(1, (t1 - t0) / 86400);
   cfg.series.forEach(function (s) {
+    if (s.band) { // shaded range between two values
+      ctx.fillStyle = scol(s); ctx.globalAlpha = 0.14; ctx.beginPath();
+      var seg = [];
+      function flush() { if (seg.length > 1) { ctx.moveTo(seg[0][0], seg[0][1]); seg.forEach(function (p) { ctx.lineTo(p[0], p[1]); }); for (var q = seg.length - 1; q >= 0; q--) ctx.lineTo(seg[q][0], seg[q][2]); ctx.closePath(); } seg = []; }
+      var pt0 = null;
+      rows.forEach(function (r) {
+        var a = r[s.band[0]], b = r[s.band[1]];
+        if (a == null || b == null || (pt0 !== null && r.t - pt0 > gap)) flush();
+        if (a != null && b != null) { seg.push([X(r.t), Y(b), Y(a)]); pt0 = r.t; }
+      });
+      flush(); ctx.fill(); ctx.globalAlpha = 1; return;
+    }
     if (s.type === 'dots') {
-      ctx.fillStyle = scol(s); rows.forEach(function (r) { var v = r[s.key]; if (v === null || v === undefined) return; ctx.beginPath(); ctx.arc(X(r.t), Y(v), 1.7, 0, 6.3); ctx.fill(); });
+      ctx.fillStyle = scol(s); rows.forEach(function (r) { var v = r[s.key]; if (v === null || v === undefined) return; ctx.beginPath(); ctx.arc(X(r.t), Y(v), kind === 'daily' ? 2.4 : 1.7, 0, 6.3); ctx.fill(); });
       return;
     }
-    ctx.strokeStyle = scol(s); ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.beginPath();
+    if (s.type === 'bars') {
+      ctx.fillStyle = scol(s); var bw = Math.max(1.2, dayW * 0.7);
+      rows.forEach(function (r) { var v = r[s.key]; if (v === null || v === undefined || v <= 0) return; ctx.fillRect(X(r.t) - bw / 2, Y(v), bw, Y(lo) - Y(v)); });
+      return;
+    }
+    ctx.strokeStyle = scol(s); ctx.lineWidth = kind === 'daily' && rows.length > 120 ? 1.4 : 1.9; ctx.lineJoin = 'round'; ctx.beginPath();
     var prevT = null;
     rows.forEach(function (r) {
       var v = r[s.key]; if (v === null || v === undefined) { prevT = null; return; }
-      if (prevT === null || r.t - prevT > 1500) ctx.moveTo(X(r.t), Y(v)); else ctx.lineTo(X(r.t), Y(v));
+      if (prevT === null || r.t - prevT > gap) ctx.moveTo(X(r.t), Y(v)); else ctx.lineTo(X(r.t), Y(v));
       prevT = r.t;
     });
     ctx.stroke();
@@ -286,33 +451,56 @@ function drawHChart(cfg) {
   if (!rows.length) { ctx.fillStyle = tc; ctx.textAlign = 'center'; ctx.fillText(histMsg || 'No data', L + pw / 2, T + ph / 2); }
   // hover / touch readout
   if (hoverT !== null && rows.length) {
-    var best = null, bd = Infinity;
-    rows.forEach(function (r) { var dd = Math.abs(r.t - hoverT); if (dd < bd) { bd = dd; best = r; } });
-    if (best && bd < 1800) {
-      var hx = X(best.t);
+    var best = null, bd = Infinity, near = kind === '5min' ? 1800 : kind === 'hourly' ? 5400 : 86400;
+    rows.forEach(function (r) { var dd2 = Math.abs(r.t - hoverT); if (dd2 < bd) { bd = dd2; best = r; } });
+    if (best && bd < near) {
+      var hx = X(best.t), when = new Date(best.t * 1000);
       ctx.strokeStyle = tc; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, T); ctx.lineTo(hx, T + ph); ctx.stroke();
-      var lines = [new Date(best.t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })];
-      cfg.series.forEach(function (s) { var v = best[s.key]; if (v !== null && v !== undefined) { ctx.fillStyle = scol(s); ctx.beginPath(); ctx.arc(hx, Y(v), 3.4, 0, 6.3); ctx.fill(); lines.push([s.color === 'text' ? '#e8eef4' : scol(s), s.name + ': ' + v.toFixed(s.dp !== undefined ? s.dp : cfg.dp) + s.unit]); } });
+      var lines = [kind === '5min' ? when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : kind === 'hourly' ? when.toLocaleString([], { weekday: 'short', hour: 'numeric' }) : when.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })];
+      cfg.series.forEach(function (s) {
+        if (s.band) return;
+        var v = best[s.key]; if (v === null || v === undefined) return;
+        if (s.type !== 'bars') { ctx.fillStyle = scol(s); ctx.beginPath(); ctx.arc(hx, Y(v), 3.4, 0, 6.3); ctx.fill(); }
+        lines.push([s.color === 'text' ? '#e8eef4' : scol(s), s.name + ': ' + v.toFixed(s.dp !== undefined ? s.dp : cfg.dp) + s.unit]);
+      });
       readoutBox(ctx, W, hx, T + 4, lines);
     }
   }
   cfg._geo = { L: L, R: R, W: W, t0: t0, t1: t1 };
 }
 function renderHistory() {
-  HCHARTS.forEach(drawHChart);
-  var msg = el('hist-msg'); msg.hidden = !histMsg || (hist && hist.rows.length > 0 && !/Could not/.test(histMsg)); msg.textContent = histMsg;
+  var set = chartSet();
+  set.forEach(drawHChart);
+  // legends follow the chart set
+  set.forEach(function (cfg) {
+    var box = el(cfg.id).parentNode.querySelector('.hleg'); if (!box) return;
+    box.innerHTML = '';
+    cfg.series.forEach(function (s) {
+      if (s.band) return;
+      var sp = mkEl('span'), sw = mkEl('i'); sw.style.background = s.color === 'text' ? 'var(--text)' : s.color;
+      sp.appendChild(sw); sp.appendChild(document.createTextNode(s.name + ' (' + s.unit.trim() + ')')); box.appendChild(sp);
+    });
+  });
+  var msg = el('hist-msg'); msg.hidden = !histMsg || (hist && hist.rows.length > 0 && !/Could not|not loaded|still need/.test(histMsg)); msg.textContent = histMsg;
   var sum = el('hist-sum'), rows = hist ? hist.rows : [];
-  if (rows.length) {
-    var hiT = -Infinity, loT = Infinity, pk = 0, rain = 0;
-    rows.forEach(function (r) { if (r.temp !== null) { hiT = Math.max(hiT, r.temp); loT = Math.min(loT, r.temp); } if (r.gust !== null) pk = Math.max(pk, r.gust); if (r.acc !== null) rain = Math.max(rain, r.acc); });
-    sum.textContent = 'High ' + fmt(hiT, 1) + '° · Low ' + fmt(loT, 1) + '° · Peak gust ' + fmt(pk, 1) + ' mph · Rain ' + fmt(rain, 2) + ' in';
-  } else sum.textContent = '';
+  if (!rows.length) { sum.textContent = ''; return; }
+  var daily = hist.kind === 'daily', hiT = -Infinity, loT = Infinity, hiAt = null, loAt = null, pk = 0, rain = 0;
+  rows.forEach(function (r) {
+    var h = daily ? r.hi : r.temp, l = daily ? r.lo : r.temp;
+    if (h !== null && h !== undefined && h > hiT) { hiT = h; hiAt = r.t; }
+    if (l !== null && l !== undefined && l < loT) { loT = l; loAt = r.t; }
+    if (r.gust !== null && r.gust !== undefined) pk = Math.max(pk, r.gust);
+    if (r.acc !== null && r.acc !== undefined) rain = Math.max(rain, r.acc);
+  });
+  function on(t) { return hist.kind === '5min' || t === null ? '' : ' (' + new Date(t * 1000).toLocaleDateString([], hist.kind === 'hourly' ? { weekday: 'short' } : { month: 'short', day: 'numeric' }) + ')'; }
+  sum.textContent = 'High ' + fmt(hiT, 1) + '°' + on(hiAt) + ' · Low ' + fmt(loT, 1) + '°' + on(loAt) + ' · Peak gust ' + fmt(pk, 1) + ' mph · Rain ' + fmt(rain, 2) + ' in';
 }
 function initHistoryCharts() {
-  HCHARTS.forEach(function (cfg) {
-    var cv = el(cfg.id);
+  buildRangeSeg();
+  HCHARTS.forEach(function (base) {
+    var cv = el(base.id);
     tapReadout(cv, function (e) {
-      var g = cfg._geo; if (!g) return;
+      var cfg = chartSet().filter(function (c) { return c.id === base.id; })[0], g = cfg && cfg._geo; if (!g) return;
       var x = e.clientX - cv.getBoundingClientRect().left;
       hoverT = g.t0 + clamp((x - g.L) / (g.W - g.L - g.R), 0, 1) * (g.t1 - g.t0); renderHistory();
     }, function () { if (hoverT !== null) { hoverT = null; renderHistory(); } }, function () { return hoverT !== null; });
