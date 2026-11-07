@@ -19,6 +19,7 @@ var OM_AQ = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 var WU_BASE = 'https://api.weather.com/v2/pws/';
 var NWS_BASE = 'https://api.weather.gov/';
 var AIRNOW_BASE = 'https://www.airnowapi.org/aq/';
+var AMB_BASE = 'https://rt.ambientweather.net/v1/';
 var TT_BASE = 'https://www.tropicaltidbits.com/analysis/models/?region=neus';
 
 var CACHE_VER = 7;                // bump when the saved-map format changes

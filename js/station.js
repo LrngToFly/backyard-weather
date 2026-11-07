@@ -27,8 +27,42 @@ async function loadStation() {
     renderStation(); renderDaylight();
   } catch (e) {
     log('Station error: ' + friendlyError(e));
+    if (await loadAmbient(e)) return;
     station = null; renderStation('error', friendlyError(e));
   }
+}
+// Backup for the live readings: when Weather Underground is unavailable (or paused after its daily limit), the card shows
+// the same station's reading from Ambient Weather, if both Ambient keys are saved. Charts and history stay on Weather Underground.
+// Ambient sends one "feels like" value; heat index and wind chill are worked out here with the National Weather Service formulas.
+function windChillF(t, w) { return t <= 50 && w >= 3 ? 35.74 + 0.6215 * t - 35.75 * Math.pow(w, 0.16) + 0.4275 * t * Math.pow(w, 0.16) : t; }
+function heatIndexF(t, rh) {
+  if (t == null || rh == null) return t;
+  var hi = 0.5 * (t + 61 + (t - 68) * 1.2 + rh * 0.094);
+  if ((hi + t) / 2 < 80) return hi;
+  hi = -42.379 + 2.04901523 * t + 10.14333127 * rh - 0.22475541 * t * rh - 0.00683783 * t * t - 0.05481717 * rh * rh +
+    0.00122874 * t * t * rh + 0.00085282 * t * rh * rh - 0.00000199 * t * t * rh * rh;
+  if (rh < 13 && t >= 80 && t <= 112) hi -= (13 - rh) / 4 * Math.sqrt((17 - Math.abs(t - 95)) / 17);
+  else if (rh > 85 && t >= 80 && t <= 87) hi += (rh - 85) / 10 * (87 - t) / 5;
+  return hi;
+}
+async function loadAmbient(wuErr) {
+  if (!settings.ambientApiKey || !settings.ambientAppKey) return false;
+  try {
+    var r = await fetch(AMB_BASE + 'devices?applicationKey=' + encodeURIComponent(settings.ambientAppKey) + '&apiKey=' + encodeURIComponent(settings.ambientApiKey), { cache: 'no-store' });
+    if (r.status === 401 || r.status === 403) throw new Error('Ambient Weather rejected the keys (HTTP ' + r.status + ')');
+    if (!r.ok) throw new Error('Ambient Weather HTTP ' + r.status);
+    var list = await r.json(), dev = (list || []).filter(function (x) { return x && x.lastData; })[0];
+    if (!dev) throw new Error('Ambient Weather has no station on this account');
+    var d = dev.lastData, t = d.tempf, w = windOk(d.windspeedmph);
+    station = {
+      temp: t, heatIndex: heatIndexF(t, d.humidity), windChill: w == null ? t : windChillF(t, w), dew: d.dewPoint, wind: w, gust: windOk(d.windgustmph),
+      pressure: d.baromrelin, rate: d.hourlyrainin, rainToday: d.dailyrainin, hum: d.humidity, dir: d.winddir, uv: d.uv, solar: d.solarradiation,
+      epoch: d.dateutc || Date.parse(d.date) || Date.now(), fetchedAt: Date.now(), src: 'ambient', paused: !!(wuErr && wuErr.paused) || !!wuPausedUntil()
+    };
+    log('Station OK from Ambient Weather (backup)');
+    renderStation(); renderDaylight();
+    return true;
+  } catch (e) { log('Ambient Weather error: ' + friendlyError(e)); return false; }
 }
 function tile(k, v, u) { return '<div class="tile"><div class="k">' + k + '</div><div class="v">' + v + '<small>' + u + '</small></div></div>'; }
 function renderStation(state, msg) {
@@ -50,7 +84,9 @@ function renderStation(state, msg) {
   box.innerHTML =
     '<div class="hero"><div class="big">' + fmt(s.temp, 1) + '<small>°F</small></div><div class="hero-side"><div>Feels like ' + fmt(feels, 0) + '°</div>' +
     '<div id="hilo" class="hilo"></div>' +
-    '<div class="muted' + (stale ? ' warn' : '') + '">Reported ' + ageTxt + '</div></div></div>' +
+    '<div class="muted' + (stale ? ' warn' : '') + '">Reported ' + ageTxt + '</div>' +
+    (s.src === 'ambient' ? '<div class="muted small">From Ambient Weather: Weather Underground ' + (s.paused ? 'paused until ' + new Date(wuPausedUntil()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'unavailable') + '</div>' : '') +
+    '</div></div>' +
     '<div class="tiles">' +
     tile('Humidity', fmt(s.hum, 0), '%') + tile('Dew point', fmt(s.dew, 0), '°') +
     tile('Wind', fmt(s.wind, 1), ' mph ' + (s.dir != null ? compass(s.dir) : '')) + tile('Gusts', fmt(s.gust, 1), ' mph') +
