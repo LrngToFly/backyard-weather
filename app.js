@@ -345,22 +345,55 @@
     if (stepIdx >= steps.length) stepIdx = 0;
   }
 
-  async function loadPoint() {
-    if (demo) { pointData = makeDemoPoint(); return; }
-    var base = OM + '?latitude=' + HOME.lat + '&longitude=' + HOME.lon +
+  // backyard forecast: one point, four selectable models
+  var PT_MODELS = [
+    { id: 'ecmwf', label: 'Euro', name: 'Euro IFS', ep: 'ecmwf', om: ['ecmwf_ifs', 'ecmwf_ifs025'] },
+    { id: 'gfs', label: 'GFS', name: 'GFS', ep: 'gfs', om: ['gfs_seamless'] },
+    { id: 'aifs', label: 'AI Euro', name: 'AI Euro (ECMWF AIFS)', ep: 'ecmwf', om: ['ecmwf_aifs025_single'] },
+    { id: 'aigfs', label: 'AI GFS', name: 'AI GFS (NOAA AIGFS)', ep: 'gfs', om: ['ncep_aigfs025'] }
+  ];
+  var ptModelId = store.get('wx.ptmodel', 'ecmwf'), pointCache = {};
+  if (!PT_MODELS.some(function (m) { return m.id === ptModelId; })) ptModelId = 'ecmwf';
+  function curPt() { return PT_MODELS.filter(function (m) { return m.id === ptModelId; })[0]; }
+  async function loadPoint(force) {
+    var P = curPt(), id = P.id;
+    if (demo) { pointData = makeDemoPoint(id); pointData.pid = id; return; }
+    var c = pointCache[id];
+    if (c && !force && Date.now() - c.fetchedAt < 3600000) { pointData = c; return; }
+    var base = OM_BASE + P.ep + '?latitude=' + HOME.lat + '&longitude=' + HOME.lon +
       '&hourly=temperature_2m,precipitation,pressure_msl&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&timezone=GMT&forecast_days=8';
-    var models = ['ecmwf_ifs', 'ecmwf_ifs025'], lastErr = null;
-    for (var m = 0; m < models.length; m++) {
+    var lastErr = null;
+    for (var m = 0; m < P.om.length; m++) {
       try {
-        var j = await omFetch(base + '&models=' + models[m]);
-        var h = j.hourly;
-        pointData = { model: models[m], times: pick(h, 'time'), t: pick(h, 'temperature_2m'), pr: pick(h, 'precipitation'), p: pick(h, 'pressure_msl') };
-        log('Backyard forecast OK (' + models[m] + ')');
+        var j = await omFetch(base + '&models=' + P.om[m]);
+        var h = j.hourly, d = { pid: id, model: P.om[m], times: pick(h, 'time'), t: pick(h, 'temperature_2m'), pr: pick(h, 'precipitation'), p: pick(h, 'pressure_msl'), fetchedAt: Date.now() };
+        pointCache[id] = d;
+        if (id !== ptModelId) return;
+        pointData = d; el('point-note').textContent = '';
+        log('Backyard forecast OK (' + P.om[m] + ')');
         return;
-      } catch (e) { lastErr = e; log('Backyard forecast (' + models[m] + ') failed: ' + friendlyError(e)); }
+      } catch (e) { lastErr = e; log('Backyard forecast (' + P.om[m] + ') failed: ' + friendlyError(e)); }
     }
-    pointData = null;
-    el('point-note').textContent = 'Could not load backyard forecast: ' + friendlyError(lastErr);
+    if (id !== ptModelId) return;
+    pointData = c || null;
+    el('point-note').textContent = 'Could not load the ' + P.label + ' backyard forecast: ' + friendlyError(lastErr);
+  }
+  function buildPtTabs() {
+    var box = el('pt-tabs'); box.innerHTML = '';
+    PT_MODELS.forEach(function (m) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'tab' + (m.id === ptModelId ? ' on' : ''); b.textContent = m.label;
+      b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', m.id === ptModelId ? 'true' : 'false');
+      b.addEventListener('click', async function () {
+        if (m.id === ptModelId) return;
+        ptModelId = m.id; store.set('wx.ptmodel', ptModelId); buildPtTabs();
+        pointData = pointCache[m.id] || null; el('point-note').textContent = pointData ? '' : 'Loading ' + m.label + '…';
+        renderPoint(); updateCompare();
+        await loadPoint(false);
+        if (m.id !== ptModelId) return;
+        renderPoint(); updateCompare();
+      });
+      box.appendChild(b);
+    });
   }
 
   // ---------------------------------------------------------------- station
@@ -434,7 +467,7 @@
     var c = el('compare'); if (!c || !station) return;
     var e = euroNow(); if (e === null) { c.textContent = ''; return; }
     var d = station.temp - e;
-    c.textContent = 'The Euro has ' + e.toFixed(0) + '° for your backyard right now; your station reads ' + Math.abs(d).toFixed(1) + '° ' + (d >= 0 ? 'warmer' : 'colder') + '.';
+    c.textContent = 'The ' + curPt().label + ' has ' + e.toFixed(0) + '° for your backyard right now; your station reads ' + Math.abs(d).toFixed(1) + '° ' + (d >= 0 ? 'warmer' : 'colder') + '.';
   }
 
   // ---------------------------------------------------------------- field math
@@ -1051,7 +1084,7 @@
     cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
     var css = getComputedStyle(document.documentElement), txt = css.getPropertyValue('--muted').trim() || '#667', line = css.getPropertyValue('--line').trim() || '#ddd';
-    var pd = pointData; if (!pd) { el('daily').innerHTML = ''; return; }
+    var pd = pointData; if (pd && pd.pid && pd.pid !== ptModelId) pd = null; if (!pd) { el('daily').innerHTML = ''; return; }
     var now = Date.now() / 1000, t0 = now, t1 = now + 120 * 3600, idx = [];
     for (var i = 0; i < pd.times.length; i++) if (pd.times[i] >= t0 - 3600 && pd.times[i] <= t1) idx.push(i);
     if (idx.length < 2) return;
@@ -1092,7 +1125,7 @@
       rows.push('<tr><td>' + (n === 0 ? 'Today' : new Date(a * 1000).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })) + '</td><td>' + Math.round(hi) + '°</td><td>' + Math.round(lo) + '°</td><td>' + pr.toFixed(2) + ' in</td></tr>');
     }
     el('daily').innerHTML = '<table><thead><tr><th></th><th>High</th><th>Low</th><th>Precip</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>';
-    el('point-note').textContent = 'Euro ' + (pd.model === 'ecmwf_ifs' ? 'IFS (9 km)' : 'IFS 0.25°') + ' at ' + HOME.lat.toFixed(2) + '°N ' + Math.abs(HOME.lon).toFixed(2) + '°W. Orange = temperature, blue bars = hourly precipitation, yellow dot = your station now.';
+    el('point-note').textContent = curPt().name + (pd.model === 'ecmwf_ifs' ? ' (9 km)' : '') + ' at ' + HOME.lat.toFixed(2) + '°N ' + Math.abs(HOME.lon).toFixed(2) + '°W. Orange = temperature, blue bars = hourly precipitation, yellow dot = your station now.';
   }
 
   // ---------------------------------------------------------------- demo data
@@ -1122,11 +1155,11 @@
     }
     return d;
   }
-  function makeDemoPoint() {
-    var t0 = Math.floor(Date.now() / 86400000) * 86400, n = 8 * 24, o = { model: 'demo', times: [], t: [], pr: [], p: [] };
+  function makeDemoPoint(id) {
+    var off = { ecmwf: 0, gfs: 1.2, aifs: -0.9, aigfs: 2 }[id] || 0, t0 = Math.floor(Date.now() / 86400000) * 86400, n = 8 * 24, o = { model: 'demo', times: [], t: [], pr: [], p: [] };
     for (var h = 0; h < n; h++) {
       var t = t0 + h * 3600; o.times.push(t);
-      o.t.push(42 + 8 * Math.sin(((t / 3600) % 24 - 15) / 24 * 6.283) - h * 0.04 + 3 * Math.sin(h / 17));
+      o.t.push(42 + off + 8 * Math.sin(((t / 3600) % 24 - 15) / 24 * 6.283) - h * 0.04 + 3 * Math.sin(h / 17 + off * 0.3));
       o.pr.push(Math.max(0, 0.08 * Math.sin(h / 9 - 1) * Math.sin(h / 5)));
       o.p.push(1012 + 7 * Math.sin(h / 20));
     }
@@ -1199,14 +1232,14 @@
     var btn = el('refresh'); btn.classList.add('spin');
     stopPlay();
     el('map-note').textContent = 'Loading…'; el('map-note').className = 'small muted';
-    await Promise.all([loadStation(), loadPoint(), loadGrid(force), loadHistory(force)]);
+    await Promise.all([loadStation(), loadPoint(force), loadGrid(force), loadHistory(force)]);
     renderPoint(); updateCompare(); scheduleRender();
     btn.classList.remove('spin');
   }
   function init() {
     document.querySelector('.sub').textContent = 'Hopkinton, MA · ' + settings.stationId;
     applyLayout();
-    buildModelPicker(); buildLinks();
+    buildModelPicker(); buildLinks(); buildPtTabs();
     el('day-prev').addEventListener('click', function () { setHistDay(1); });
     el('day-next').addEventListener('click', function () { setHistDay(-1); });
     HCHARTS.forEach(function (c) { var cv = el(c.id); cv.addEventListener('pointerdown', histPointer); cv.addEventListener('pointermove', histPointer); cv.addEventListener('pointerup', histPointerEnd); cv.addEventListener('pointerleave', histPointerEnd); cv.addEventListener('pointercancel', histPointerEnd); });

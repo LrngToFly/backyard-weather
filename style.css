@@ -138,3 +138,4 @@ details summary { min-height: 36px; display: flex; align-items: center; color: v
 [hidden] { display: none !important; }
 #colL, #colR { display: none; }
 .w-big #colL, .w-big #colR { display: block; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
