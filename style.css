@@ -139,3 +139,8 @@ details summary { min-height: 36px; display: flex; align-items: center; color: v
 #colL, #colR { display: none; }
 .w-big #colL, .w-big #colR { display: block; }
 .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.sun-tiles { grid-template-columns: repeat(3, 1fr); }
+.tile.next { box-shadow: inset 0 0 0 2px var(--accent); }
+.w-med .sun-tiles { grid-template-columns: repeat(6, 1fr); }
+.w-big .sun-tiles { grid-template-columns: repeat(3, 1fr); }
+#daylight-note { margin: 10px 0 0; }
