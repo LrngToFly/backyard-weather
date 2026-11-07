@@ -32,6 +32,7 @@ h2 { font-size: 17px; margin: 0 0 10px; display: flex; align-items: center; gap:
 .icon-btn.spin svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 main { padding: 0 max(16px, env(safe-area-inset-left)) 28px max(16px, env(safe-area-inset-right)); max-width: 560px; margin: 0 auto; }
+.top { max-width: 560px; margin: 0 auto; }
 .card { background: var(--card); border-radius: 16px; padding: 14px; margin: 12px 0; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 .chip { font-size: 11px; font-weight: 600; background: var(--chip); color: var(--accent); padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; }
 .muted { color: var(--muted); }
@@ -109,3 +110,31 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .out { background: var(--bg); border-radius: 10px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; margin: 0; }
 .out:empty { display: none; }
 details summary { min-height: 36px; display: flex; align-items: center; color: var(--muted); font-size: 14px; }
+
+/* ---- station charts ---- */
+.daynav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.day-label { font-weight: 650; font-size: 16px; text-align: center; flex: 1; }
+.ctl:disabled { opacity: .4; cursor: default; }
+.hchart { margin: 10px 0 4px; }
+.hchart h3 { font-size: 14px; margin: 0 0 4px; color: var(--muted); font-weight: 650; }
+.hchart canvas { display: block; width: 100%; touch-action: pan-y; }
+.hleg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--text); margin: 2px 0 0 4px; }
+.hleg i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+/* ---- iPad / wide screens (classes set by app.js from the window width) ---- */
+.w-med main, .w-med .top { max-width: 860px; }
+.w-med .tiles { grid-template-columns: repeat(4, 1fr); }
+.w-med .links { grid-template-columns: repeat(2, 1fr); }
+.w-med .tab { font-size: 15px; }
+.w-med h1 { font-size: 26px; }
+.w-med .card { padding: 18px; border-radius: 18px; }
+.w-big main, .w-big .top { max-width: 1280px; }
+.w-big main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); column-gap: 16px; align-items: start; }
+.w-big #banner, .w-big footer { grid-column: 1 / -1; }
+.w-big #colL, .w-big #colR { display: block; min-width: 0; }
+.w-big .tiles { grid-template-columns: repeat(2, 1fr); }
+.w-big .links { grid-template-columns: 1fr; }
+.w-big .card { margin: 0 0 14px; }
+[hidden] { display: none !important; }
+#colL, #colR { display: none; }
+.w-big #colL, .w-big #colR { display: block; }

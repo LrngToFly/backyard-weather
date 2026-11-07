@@ -45,7 +45,7 @@
     set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
     del: function (k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
   };
-  var settings = Object.assign({ apiKey: '', stationId: 'KMAHOPKI22', detail: 'fine', playMs: 700 }, store.get('wx.settings', {}));
+  var settings = Object.assign({ apiKey: '', stationId: 'KMAHOPKI22', detail: 'fine', playMs: 700, layout: 'auto' }, store.get('wx.settings', {}));
   var params = new URLSearchParams(location.search);
   var demo = params.get('demo') === '1' || store.get('wx.demo', false);
 
@@ -656,7 +656,7 @@
     function proj(lon, lat) { return [(lon - DOM.lon0) / (DOM.lon1 - DOM.lon0) * W, (DOM.lat1 - lat) / (DOM.lat1 - DOM.lat0) * H]; }
     if (d && d.steps && d.steps.length) {
       var g = stepGrids(d, stepIdx);
-      shade(g, W, H, 2);
+      shade(g, W, H, W > 520 ? 1.5 : 2);
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(off, 0, 0, W, H);
       geoLines(ctx, proj);
@@ -851,6 +851,193 @@
     });
   }
 
+
+  // ---------------------------------------------------------------- station day charts (Weather Underground 5-minute history)
+  var hist = null, histOffset = 0, histFetchedAt = 0, histCache = {}, histMsg = 'Loading…', hoverT = null, hoverTimer = 0;
+  function dayStartFor(offset) { var d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - offset); return d; }
+  function ymd(d) { return d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()); }
+  function num() { for (var i = 0; i < arguments.length; i++) { var v = arguments[i]; if (v !== null && v !== undefined && v !== '' && !isNaN(v)) return +v; } return null; }
+  async function loadHistory(force) {
+    var day = dayStartFor(histOffset), ds = ymd(day), t0 = day.getTime() / 1000, t1 = dayStartFor(histOffset - 1).getTime() / 1000;
+    var label = histOffset === 0 ? 'Today' : histOffset === 1 ? 'Yesterday' : day.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+    el('day-label').textContent = label + (histOffset <= 1 ? ' · ' + day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : '');
+    el('day-next').disabled = histOffset === 0; el('day-prev').disabled = histOffset >= 14;
+    histMsg = '';
+    if (demo) { hist = makeDemoHistory(day, t0, t1); histFetchedAt = Date.now(); renderHistory(); return; }
+    if (!settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
+    var c = histCache[ds];
+    if (c && !force && (histOffset > 0 || Date.now() - c.fetchedAt < 240000)) { hist = c; histFetchedAt = c.fetchedAt; renderHistory(); return; }
+    var url = 'https://api.weather.com/v2/pws/history/all?stationId=' + encodeURIComponent(settings.stationId) +
+      '&format=json&units=e&numericPrecision=decimal&date=' + ds + '&apiKey=' + encodeURIComponent(settings.apiKey);
+    try {
+      var r = await fetch(url, { cache: 'no-store' });
+      if (ds !== ymd(dayStartFor(histOffset))) return; // day changed while loading
+      if (r.status === 204) { hist = { ds: ds, t0: t0, t1: t1, rows: [], fetchedAt: Date.now() }; histMsg = 'No readings reported for this day.'; renderHistory(); return; }
+      if (r.status === 401 || r.status === 403) throw new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
+      if (!r.ok) throw new Error('Weather Underground HTTP ' + r.status);
+      var j = await r.json(), obs = j.observations || [], rows = [];
+      obs.forEach(function (o) {
+        var im = o.imperial || {}, t = o.epoch || (o.obsTimeUtc ? Date.parse(o.obsTimeUtc) / 1000 : null);
+        if (!t) return;
+        rows.push({
+          t: t, temp: num(im.tempAvg, im.temp, im.tempHigh), dew: num(im.dewptAvg, im.dewpt, im.dewptHigh),
+          wind: num(im.windspeedAvg, im.windSpeed, im.windspeedHigh), gust: num(im.windgustHigh, im.windgustAvg, im.windGust),
+          rate: num(im.precipRate), acc: num(im.precipTotal)
+        });
+      });
+      rows.sort(function (a, b) { return a.t - b.t; });
+      hist = { ds: ds, t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
+      histCache[ds] = hist; histFetchedAt = hist.fetchedAt;
+      log('Station history ' + ds + ': ' + rows.length + ' readings' + (obs[0] ? '; fields: ' + Object.keys(obs[0].imperial || {}).join(',') : ''));
+      if (!rows.length) histMsg = 'No readings reported for this day.';
+    } catch (e) {
+      log('Station history error: ' + friendlyError(e));
+      hist = c || null; histMsg = 'Could not load station charts: ' + friendlyError(e);
+    }
+    renderHistory();
+  }
+  function niceTicks(lo, hi, n) {
+    var span = Math.max(hi - lo, 1e-6), raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag;
+    var step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag;
+    var a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step, out = [];
+    for (var v = a; v <= b + step * 0.001; v += step) out.push(+v.toFixed(6));
+    return out;
+  }
+  function hourLabel(h) { var m = h % 24, ap = (m < 12) ? 'AM' : 'PM'; return (m % 12 === 0 ? 12 : m % 12) + ap; }
+  // chart definitions: which series sit on which chart
+  var HCHARTS = [
+    { id: 'h-temp', zero: false, freeze: true, dp: 1, series: [
+      { key: 'temp', name: 'Temperature', unit: '°F', color: '#a84a3e', type: 'line' }, { key: 'dew', name: 'Dew Point', unit: '°F', color: '#7f9f5e', type: 'line' }] },
+    { id: 'h-wind', zero: true, dp: 1, series: [
+      { key: 'wind', name: 'Wind Speed', unit: ' mph', color: '#4054a8', type: 'line' }, { key: 'gust', name: 'Gust', unit: ' mph', color: '#d19a55', type: 'dots' }] },
+    { id: 'h-rain', zero: true, dp: 2, minMax: 0.4, series: [
+      { key: 'acc', name: 'Precip. Accum. Total', unit: ' in', color: '#7ba3d8', type: 'line', dp: 2 }, { key: 'rate', name: 'Precip. Rate', unit: ' in/hr', color: '#7f9f5e', type: 'line', dp: 2 }] }
+  ];
+  function drawHChart(cfg) {
+    var cv = el(cfg.id), W = Math.floor(cv.parentNode.getBoundingClientRect().width) || 320, H = clamp(Math.round(W * 0.46), 160, 230), dpr = Math.min(window.devicePixelRatio || 1, 3);
+    cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    var css = getComputedStyle(document.documentElement), txt = css.getPropertyValue('--muted').trim() || '#667', line = css.getPropertyValue('--line').trim() || '#ddd', tcol = css.getPropertyValue('--text').trim() || '#111';
+    var d = hist, rows = d ? d.rows : [], t0 = d ? d.t0 : dayStartFor(histOffset).getTime() / 1000, t1 = d ? d.t1 : t0 + 86400;
+    var lo = Infinity, hi = -Infinity;
+    rows.forEach(function (r) { cfg.series.forEach(function (s) { var v = r[s.key]; if (v !== null && v !== undefined) { if (v < lo) lo = v; if (v > hi) hi = v; } }); });
+    if (lo === Infinity) { lo = cfg.zero ? 0 : 30; hi = cfg.zero ? 1 : 60; }
+    if (cfg.zero) lo = 0;
+    if (cfg.minMax) hi = Math.max(hi, cfg.minMax);
+    if (!cfg.zero) { lo -= 0.6; hi += 0.6; }
+    var ticks = niceTicks(lo, hi * (cfg.zero ? 1.04 : 1), H < 190 ? 4 : 5); lo = ticks[0]; hi = ticks[ticks.length - 1];
+    var L = 34, R = 10, T = 8, B = 22, pw = W - L - R, ph = H - T - B;
+    function X(t) { return L + (t - t0) / (t1 - t0) * pw; }
+    function Y(v) { return T + (1 - (v - lo) / (hi - lo)) * ph; }
+    // shaded hour stripes
+    ctx.fillStyle = tcol; ctx.globalAlpha = 0.055;
+    for (var hh = 1; hh < 24; hh += 2) ctx.fillRect(X(t0 + hh * 3600), T, pw / 24, ph);
+    ctx.globalAlpha = 1;
+    ctx.font = '11px -apple-system, system-ui, sans-serif'; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+    ticks.forEach(function (v) { ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(W - R, Y(v)); ctx.stroke(); ctx.fillStyle = txt; ctx.fillText(String(v), L - 5, Y(v)); });
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    var step = W < 480 ? 6 : 3;
+    for (var h2 = 0; h2 <= 24; h2 += step) { var tx = clamp(X(t0 + h2 * 3600), L + 12, W - R - 12); ctx.fillStyle = txt; ctx.fillText(hourLabel(h2), tx, H - 6); }
+    if (cfg.freeze && lo < 32 && hi > 32) { ctx.strokeStyle = '#1a4fb8'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(L, Y(32)); ctx.lineTo(W - R, Y(32)); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#1a4fb8'; ctx.textAlign = 'left'; ctx.fillText('32°', L + 3, Y(32) - 3); }
+    ctx.save(); ctx.beginPath(); ctx.rect(L, T - 2, pw, ph + 4); ctx.clip();
+    cfg.series.forEach(function (s) {
+      if (s.type === 'dots') {
+        ctx.fillStyle = s.color; rows.forEach(function (r) { var v = r[s.key]; if (v === null || v === undefined) return; ctx.beginPath(); ctx.arc(X(r.t), Y(v), 1.7, 0, 6.3); ctx.fill(); });
+        return;
+      }
+      ctx.strokeStyle = s.color; ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.beginPath();
+      var prevT = null;
+      rows.forEach(function (r) {
+        var v = r[s.key]; if (v === null || v === undefined) { prevT = null; return; }
+        if (prevT === null || r.t - prevT > 1500) ctx.moveTo(X(r.t), Y(v)); else ctx.lineTo(X(r.t), Y(v));
+        prevT = r.t;
+      });
+      ctx.stroke();
+    });
+    ctx.restore();
+    ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, T + ph); ctx.lineTo(W - R, T + ph); ctx.stroke();
+    if (!rows.length) { ctx.fillStyle = txt; ctx.textAlign = 'center'; ctx.fillText(histMsg || 'No data', L + pw / 2, T + ph / 2); }
+    // hover / touch readout
+    if (hoverT !== null && rows.length) {
+      var best = null, bd = Infinity;
+      rows.forEach(function (r) { var dd = Math.abs(r.t - hoverT); if (dd < bd) { bd = dd; best = r; } });
+      if (best && bd < 1800) {
+        var hx = X(best.t);
+        ctx.strokeStyle = txt; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, T); ctx.lineTo(hx, T + ph); ctx.stroke();
+        var lines = [new Date(best.t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })];
+        cfg.series.forEach(function (s) { var v = best[s.key]; if (v !== null && v !== undefined) { ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(hx, Y(v), 3.4, 0, 6.3); ctx.fill(); lines.push([s, s.name + ': ' + v.toFixed(s.dp !== undefined ? s.dp : cfg.dp) + s.unit]); } });
+        ctx.font = '600 12px -apple-system, system-ui, sans-serif';
+        var bw = 0; lines.forEach(function (l, i) { var tx2 = i ? l[1] : l; bw = Math.max(bw, ctx.measureText(tx2).width + (i ? 16 : 0)); });
+        bw += 16; var bh = lines.length * 17 + 8, bx = hx + 10; if (bx + bw > W - 2) bx = hx - 10 - bw; if (bx < 2) bx = 2;
+        var by = T + 4;
+        ctx.fillStyle = 'rgba(28,34,42,.93)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 7); else ctx.rect(bx, by, bw, bh); ctx.fill();
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        lines.forEach(function (l, i) {
+          var yy = by + 4 + i * 17 + 8.5;
+          if (!i) { ctx.fillStyle = '#ffffff'; ctx.fillText(l, bx + 8, yy); }
+          else { ctx.fillStyle = l[0].color; ctx.fillRect(bx + 8, yy - 5, 9, 9); ctx.fillStyle = '#ffffff'; ctx.fillText(l[1], bx + 22, yy); }
+        });
+        ctx.textBaseline = 'alphabetic';
+      }
+    }
+    cfg._geo = { L: L, R: R, W: W, t0: t0, t1: t1 };
+  }
+  function renderHistory() {
+    HCHARTS.forEach(drawHChart);
+    var msg = el('hist-msg'); msg.hidden = !histMsg || (hist && hist.rows.length > 0 && !/Could not/.test(histMsg)); msg.textContent = histMsg;
+    var sum = el('hist-sum'), rows = hist ? hist.rows : [];
+    if (rows.length) {
+      var hiT = -Infinity, loT = Infinity, pk = 0, rain = 0;
+      rows.forEach(function (r) { if (r.temp !== null) { hiT = Math.max(hiT, r.temp); loT = Math.min(loT, r.temp); } if (r.gust !== null) pk = Math.max(pk, r.gust); if (r.acc !== null) rain = Math.max(rain, r.acc); });
+      sum.textContent = 'High ' + fmt(hiT, 1) + '° · Low ' + fmt(loT, 1) + '° · Peak gust ' + fmt(pk, 1) + ' mph · Rain ' + fmt(rain, 2) + ' in';
+    } else sum.textContent = '';
+  }
+  function histPointer(e) {
+    var cv = e.currentTarget, rect = cv.getBoundingClientRect(), cfg = HCHARTS.filter(function (c) { return c.id === cv.id; })[0];
+    if (!cfg || !cfg._geo) return;
+    var g = cfg._geo, x = e.clientX - rect.left;
+    hoverT = g.t0 + clamp((x - g.L) / (g.W - g.L - g.R), 0, 1) * (g.t1 - g.t0);
+    clearTimeout(hoverTimer); renderHistory();
+  }
+  function histPointerEnd(e) {
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(function () { hoverT = null; renderHistory(); }, e.pointerType === 'mouse' ? 50 : 3000);
+  }
+  function setHistDay(delta) {
+    histOffset = clamp(histOffset + delta, 0, 14); hoverT = null; loadHistory(false);
+  }
+  function makeDemoHistory(day, t0, t1) {
+    var rows = [], now = Date.now() / 1000, end = Math.min(t1, histOffset === 0 ? now : t1), acc = 0, seed = histOffset * 7.3;
+    for (var t = t0; t < end; t += 300) {
+      var hr = (t - t0) / 3600, tc = 52 + 9 * Math.sin((hr - 9) / 24 * 6.283) + 2 * Math.sin(hr * 1.3 + seed);
+      var ev = Math.max(0, Math.sin((hr - 14 + seed) / 3.2)) * Math.max(0, Math.sin(hr * 0.9 + seed)), rate = ev > 0.55 ? (ev - 0.55) * 0.9 : 0;
+      acc += rate / 12;
+      var ws = Math.max(0, 3 + 2.6 * Math.sin(hr * 1.1 + seed) + 1.5 * Math.sin(hr * 7.1));
+      rows.push({ t: t, temp: +(tc - (rate > 0 ? 3 : 0)).toFixed(1), dew: +(tc - 7 + (rate > 0 ? 6 : 0) + Math.sin(hr)).toFixed(1), wind: +ws.toFixed(1), gust: ws > 1 ? +(ws + 1.5 + Math.abs(Math.sin(hr * 5)) * 2.5).toFixed(1) : null, rate: +rate.toFixed(2), acc: +acc.toFixed(2) });
+    }
+    return { ds: ymd(day), t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
+  }
+
+  // ---------------------------------------------------------------- screen layout (phone / iPad portrait / iPad landscape)
+  // two columns on a landscape iPad: map + Euro forecast on the left, station + charts + links on the right
+  var placedBig = null;
+  function placeCards(big) {
+    if (placedBig === big) return; placedBig = big;
+    var main = document.querySelector('main'), foot = document.querySelector('footer'), L = el('colL'), R = el('colR');
+    if (big) { ['maps', 'point'].forEach(function (id) { L.appendChild(el(id)); }); ['station', 'today', 'tt'].forEach(function (id) { R.appendChild(el(id)); }); }
+    else ['station', 'maps', 'today', 'point', 'tt'].forEach(function (id) { main.insertBefore(el(id), foot); });
+  }
+  function applyLayout() {
+    var w = document.documentElement.clientWidth, mode = settings.layout || 'auto', cl = document.documentElement.classList, med, big;
+    if (mode === 'phone') { med = false; big = false; }
+    else if (mode === 'tablet') { med = true; big = w >= 900; }
+    else { med = w >= 700; big = w >= 1000; }
+    var changed = cl.contains('w-med') !== med || cl.contains('w-big') !== big;
+    cl.toggle('w-med', med); cl.toggle('w-big', big);
+    placeCards(big);
+    return changed;
+  }
+
   // ---------------------------------------------------------------- backyard chart
   function localDayStart(t) { var d = new Date(t * 1000); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; }
   function renderPoint() {
@@ -946,7 +1133,7 @@
   // ---------------------------------------------------------------- settings + diagnostics
   function openSettings() {
     el('set-key').value = settings.apiKey; el('set-station').value = settings.stationId; el('set-detail').value = settings.detail;
-    el('set-demo').checked = !!demo;
+    el('set-demo').checked = !!demo; el('set-layout').value = settings.layout || 'auto';
     el('set-speed').value = clamp(+settings.playMs || 700, 250, 1500); showSpeed();
     var dlg = el('settings'); if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
     el('diag-log').textContent = logLines.join('\n');
@@ -955,7 +1142,7 @@
   function saveSettings() {
     var changedDetail = el('set-detail').value !== settings.detail;
     settings.apiKey = el('set-key').value.trim(); settings.stationId = (el('set-station').value.trim() || 'KMAHOPKI22').toUpperCase(); settings.detail = el('set-detail').value;
-    settings.playMs = +el('set-speed').value || 700;
+    settings.playMs = +el('set-speed').value || 700; settings.layout = el('set-layout').value;
     store.set('wx.settings', settings);
     if (playTimer) { stopPlay(); togglePlay(); }
     var wantDemo = el('set-demo').checked, demoChanged = wantDemo !== demo;
@@ -963,7 +1150,8 @@
     el('settings').close();
     updateBanner();
     document.querySelector('.sub').textContent = 'Hopkinton, MA · ' + settings.stationId;
-    if (changedDetail || demoChanged) { stepIdx = 0; refreshAll(true); } else { loadStation(); }
+    applyLayout(); scheduleRender(); renderPoint(); renderHistory();
+    histCache = {}; if (changedDetail || demoChanged) { stepIdx = 0; refreshAll(true); } else { loadStation(); loadHistory(true); }
   }
   async function runChecks() {
     var out = el('check-out'); out.textContent = 'Checking…'; var lines = [];
@@ -1005,13 +1193,17 @@
     var btn = el('refresh'); btn.classList.add('spin');
     stopPlay();
     el('map-note').textContent = 'Loading…'; el('map-note').className = 'small muted';
-    await Promise.all([loadStation(), loadPoint(), loadGrid(force)]);
+    await Promise.all([loadStation(), loadPoint(), loadGrid(force), loadHistory(force)]);
     renderPoint(); updateCompare(); scheduleRender();
     btn.classList.remove('spin');
   }
   function init() {
     document.querySelector('.sub').textContent = 'Hopkinton, MA · ' + settings.stationId;
+    applyLayout();
     buildModelPicker(); buildLinks();
+    el('day-prev').addEventListener('click', function () { setHistDay(1); });
+    el('day-next').addEventListener('click', function () { setHistDay(-1); });
+    HCHARTS.forEach(function (c) { var cv = el(c.id); cv.addEventListener('pointerdown', histPointer); cv.addEventListener('pointermove', histPointer); cv.addEventListener('pointerup', histPointerEnd); cv.addEventListener('pointerleave', histPointerEnd); cv.addEventListener('pointercancel', histPointerEnd); });
     buildTabs(); updateBanner();
     el('model').addEventListener('change', function (e) { switchModel(e.target.value); });
     el('tt-model').addEventListener('change', function (e) { ttModelId = e.target.value; store.set('wx.ttmodel', ttModelId); buildLinks(); });
@@ -1031,14 +1223,15 @@
       if (a.dataset.action === 'settings') openSettings();
       if (a.dataset.action === 'dismiss-tip') { store.set('wx.tipDismissed', true); updateBanner(); }
     });
-    var rz; window.addEventListener('resize', function () { clearTimeout(rz); rz = setTimeout(function () { scheduleRender(); renderPoint(); }, 150); });
+    var rz; window.addEventListener('resize', function () { applyLayout(); clearTimeout(rz); rz = setTimeout(function () { applyLayout(); scheduleRender(); renderPoint(); renderHistory(); }, 120); });
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState !== 'visible') return;
       if (!station || Date.now() - station.fetchedAt > 60000) loadStation();
+      if (histOffset === 0 && Date.now() - histFetchedAt > 240000) loadHistory(true);
       if (gridData && Date.now() - gridData.fetchedAt > GRID_TTL && !demo) refreshAll(false);
     });
-    setInterval(function () { if (document.visibilityState === 'visible') loadStation(); }, 60000);
-    if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { scheduleRender(); renderPoint(); });
+    setInterval(function () { if (document.visibilityState === 'visible') { loadStation(); if (histOffset === 0 && Date.now() - histFetchedAt > 290000) loadHistory(true); } }, 60000);
+    if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { scheduleRender(); renderPoint(); renderHistory(); });
     renderStation(settings.apiKey || demo ? undefined : 'nokey');
     refreshAll(false);
   }
