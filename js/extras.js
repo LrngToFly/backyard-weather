@@ -49,19 +49,19 @@ function anRow(o) {
   function f() { for (var i = 0; i < arguments.length; i++) if (o[arguments[i]] !== undefined && o[arguments[i]] !== null) return o[arguments[i]]; return undefined; }
   var c = f('Category', 'category') || {};
   return {
-    aqi: num(f('AQI', 'aqi', 'Aqi')) !== null ? num(f('AQI', 'aqi', 'Aqi')) : -1,
+    aqi: num(f('nowcastAQI', 'AQI', 'aqi', 'Aqi')) !== null ? num(f('nowcastAQI', 'AQI', 'aqi', 'Aqi')) : -1,
     param: f('ParameterName', 'parameterName', 'Parameter', 'parameter') || '',
-    area: f('ReportingArea', 'reportingArea', 'ReportingAreaName') || '',
-    date: String(f('DateForecast', 'dateForecast', 'ForecastDate', 'DateValid') || '').trim().slice(0, 10),
-    cat: num(typeof c === 'object' ? (c.Number || c.number) : f('CategoryNumber', 'categoryNumber')),
-    catName: typeof c === 'object' ? (c.Name || c.name) : f('CategoryName', 'categoryName')
+    area: f('reportingAreaName', 'ReportingArea', 'reportingArea', 'ReportingAreaName') || '',
+    date: String(f('dateValid', 'DateForecast', 'dateForecast', 'ForecastDate', 'DateValid') || '').trim().slice(0, 10),
+    cat: num((typeof c === 'object' && (c.Number || c.number)) || f('categoryNumber', 'CategoryNumber')),
+    catName: (typeof c === 'object' ? (c.Name || c.name) : null) || f('aqiCategoryName', 'categoryName', 'CategoryName')
   };
 }
 function fetchTimeout(url, ms) {
   var ac = new AbortController(), t = setTimeout(function () { ac.abort(); }, ms);
   return fetch(url, { cache: 'no-store', signal: ac.signal }).finally(function () { clearTimeout(t); });
 }
-function niceParam(p) { return p === 'O3' ? 'ozone' : p === 'PM2.5' ? 'fine particles (PM2.5)' : p === 'PM10' ? 'PM10' : p; }
+function niceParam(p) { return p === 'O3' || p === 'OZONE' ? 'ozone' : p === 'PM2.5' ? 'fine particles (PM2.5)' : p === 'PM10' ? 'PM10' : p; }
 async function loadAQ(force) {
   if (!force && aqData && Date.now() - aqAt < 30 * 60000) { renderAQ(); return; }
   if (demo) { aqData = makeDemoAQ(); aqAt = Date.now(); renderAQ(); return; }
@@ -112,9 +112,10 @@ function renderAQ() {
 }
 
 // ---------------------------------------------------------------- model scorecard
-// Open-Meteo keeps every model's past forecasts. For each recent day we take the high and low each model predicted
+// Open-Meteo keeps every model's past forecasts. For each recent day we take the high, low and rain each model predicted
 // 1, 3 and 5 days ahead and compare them with what your station recorded.
-var SCORE_LEADS = [1, 3, 5], SCORE_DAYS = 30;
+// Rain is scored as "rain day or dry day called right" (0.05 in or more counts as a rain day) plus the 30-day totals.
+var SCORE_LEADS = [1, 3, 5], SCORE_DAYS = 30, RAIN_DAY = 0.05;
 var scoreMode = store.get('wx.scoremode', 'both'), scoreRes = null, scoreBusy = false;
 async function loadScore(force) {
   if (demo) { scoreRes = makeDemoScore(); renderScore(); return; }
@@ -123,15 +124,18 @@ async function loadScore(force) {
   try {
     await loadObsStore();
     var today = ymd(dayStart(0)), fc = await idb.get('score-fc');
-    if (force || !fc || fc.day !== today || fc.station !== settings.stationId) {
-      var L = homeLoc(), vars = SCORE_LEADS.map(function (n) { return 'temperature_2m_previous_day' + n; }).join(',');
+    if (force || !fc || fc.day !== today || fc.station !== settings.stationId || !fc.p) {
+      var L = homeLoc(), vars = SCORE_LEADS.map(function (n) { return 'temperature_2m_previous_day' + n + ',precipitation_previous_day' + n; }).join(',');
       var oms = PT_MODELS.map(function (m) { return m.om; });
       var j = await omFetch(OM_PREV + '?latitude=' + L.lat.toFixed(3) + '&longitude=' + L.lon.toFixed(3) + '&hourly=' + vars + '&models=' + oms.join(',') +
-        '&past_days=62&forecast_days=0&temperature_unit=fahrenheit&timeformat=unixtime&timezone=GMT');
-      fc = { day: today, station: settings.stationId, times: j.hourly.time, v: {} };
+        '&past_days=62&forecast_days=0&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&timezone=GMT');
+      fc = { day: today, station: settings.stationId, times: j.hourly.time, v: {}, p: {} };
       PT_MODELS.forEach(function (m) {
-        fc.v[m.id] = {};
-        SCORE_LEADS.forEach(function (n) { fc.v[m.id][n] = j.hourly['temperature_2m_previous_day' + n + '_' + m.om] || []; });
+        fc.v[m.id] = {}; fc.p[m.id] = {};
+        SCORE_LEADS.forEach(function (n) {
+          fc.v[m.id][n] = j.hourly['temperature_2m_previous_day' + n + '_' + m.om] || [];
+          fc.p[m.id][n] = j.hourly['precipitation_previous_day' + n + '_' + m.om] || [];
+        });
       });
       idb.set('score-fc', fc);
       log('Scorecard: past forecasts loaded (' + fc.times.length + ' hours)');
@@ -154,6 +158,11 @@ function computeScore(fc) {
     days.push(ds);
   });
   var res = { n: days.length, first: days[0], last: days[days.length - 1], models: [] };
+  // rain: the same days, where the station also reported a rain total
+  var rdays = days.filter(function (ds) { return obsDays[ds].rain != null; });
+  res.rainN = rdays.length;
+  res.obsRain = rdays.reduce(function (s, ds) { return s + obsDays[ds].rain; }, 0);
+  res.wetDays = rdays.filter(function (ds) { return obsDays[ds].rain >= RAIN_DAY; }).length;
   PT_MODELS.forEach(function (m) {
     var row = { id: m.id, label: m.label, lead: {} };
     SCORE_LEADS.forEach(function (n) {
@@ -167,6 +176,15 @@ function computeScore(fc) {
       function mae(x) { return x.length ? x.reduce(function (s, v) { return s + Math.abs(v); }, 0) / x.length : null; }
       function mean(x) { return x.length ? x.reduce(function (s, v) { return s + v; }, 0) / x.length : null; }
       row.lead[n] = { hi: mae(eh), lo: mae(el2), both: eh.length ? (mae(eh) + mae(el2)) / 2 : null, biasHi: mean(eh), biasLo: mean(el2), n: eh.length };
+      var pr = fc.p && fc.p[m.id] && fc.p[m.id][n], hits = 0, cnt = 0, tot = 0;
+      if (pr && pr.length) rdays.forEach(function (ds) {
+        var sum = 0, any = false;
+        byDay[ds].forEach(function (i) { var v = pr[i]; if (v != null) { sum += v; any = true; } });
+        if (!any) return;
+        cnt++; tot += sum;
+        if ((sum >= RAIN_DAY) === (obsDays[ds].rain >= RAIN_DAY)) hits++;
+      });
+      row.lead[n].rain = cnt ? hits / cnt * 100 : null; row.lead[n].rainTotal = cnt ? tot : null; row.lead[n].rainN = cnt;
     });
     res.models.push(row);
   });
@@ -182,49 +200,68 @@ function renderScore() {
   drawScore();
 }
 function drawScore() {
-  var box = el('score-body'), R = scoreRes; box.innerHTML = '';
-  var seg = mkEl('div', 'seg seg3');
-  [['both', 'Highs & lows'], ['hi', 'Highs'], ['lo', 'Lows']].forEach(function (o) {
+  var box = el('score-body'), R = scoreRes, rain = scoreMode === 'rain'; box.innerHTML = '';
+  var seg = mkEl('div', 'seg');
+  [['both', 'Highs & lows'], ['hi', 'Highs'], ['lo', 'Lows'], ['rain', 'Rain']].forEach(function (o) {
     var b = mkEl('button', 'tab' + (scoreMode === o[0] ? ' on' : ''), o[1]); b.type = 'button';
     b.addEventListener('click', function () { scoreMode = o[0]; store.set('wx.scoremode', scoreMode); drawScore(); });
     seg.appendChild(b);
   });
   box.appendChild(seg);
-  if (R.n < 3) {
-    box.appendChild(mkEl('p', 'muted', R.n ? 'Only ' + R.n + ' day' + (R.n === 1 ? '' : 's') + ' of station history so far.' : 'Waiting for station history.'));
+  var n0 = rain ? R.rainN || 0 : R.n;
+  if (n0 < 3) {
+    box.appendChild(mkEl('p', 'muted', n0 ? 'Only ' + n0 + ' day' + (n0 === 1 ? '' : 's') + ' of station history so far.' : 'Waiting for station history.'));
     box.appendChild(mkEl('p', 'small muted', 'Past days are loaded from Weather Underground a few at a time' + (backfillLeft ? ' (' + backfillLeft + ' to go)' : '') + '. The scorecard fills in over the next few visits.'));
     return;
   }
+  var key = rain ? 'rain' : scoreMode;
   var tbl = mkEl('table', 'score'), thead = mkEl('tr');
   thead.appendChild(mkEl('th', '', 'Model'));
   SCORE_LEADS.forEach(function (n) { thead.appendChild(mkEl('th', '', n + (n === 1 ? ' day' : ' days') + ' ahead')); });
   var th = mkEl('thead'); th.appendChild(thead); tbl.appendChild(th);
+  // best = lowest miss for temperatures, highest share of days called right for rain
   var best = {};
   SCORE_LEADS.forEach(function (n) {
-    var b = Infinity; R.models.forEach(function (m) { var v = m.lead[n][scoreMode]; if (v != null && v < b) b = v; }); best[n] = b;
+    var b = rain ? -Infinity : Infinity;
+    R.models.forEach(function (m) { var v = m.lead[n][key]; if (v != null && (rain ? v > b : v < b)) b = v; });
+    best[n] = b;
   });
   var tb = mkEl('tbody');
   R.models.forEach(function (m) {
     var tr = mkEl('tr'); tr.appendChild(mkEl('td', '', m.label));
     SCORE_LEADS.forEach(function (n) {
-      var v = m.lead[n][scoreMode];
-      tr.appendChild(mkEl('td', v != null && Math.abs(v - best[n]) < 0.05 ? 'best' : '', v == null ? '–' : v.toFixed(1) + '°'));
+      var v = m.lead[n][key], isBest = v != null && Math.abs(v - best[n]) < (rain ? 0.5 : 0.05);
+      tr.appendChild(mkEl('td', isBest ? 'best' : '', v == null ? '–' : rain ? Math.round(v) + '%' : v.toFixed(1) + '°'));
     });
     tb.appendChild(tr);
   });
   tbl.appendChild(tb); box.appendChild(tbl);
-  // which way each model leans, 1 day ahead
-  var bias = mkEl('ul', 'bias small');
-  R.models.forEach(function (m) {
-    var l = m.lead[1]; if (l.biasHi == null) return;
-    function lean(v, what) { return Math.abs(v) < 0.5 ? what + ' about right' : what + ' ' + Math.abs(v).toFixed(1) + '° too ' + (v > 0 ? 'warm' : 'cold'); }
-    bias.appendChild(mkEl('li', '', m.label + ': ' + lean(l.biasHi, 'highs') + ', ' + lean(l.biasLo, 'lows')));
-  });
-  box.appendChild(mkEl('p', 'small score-h', 'Leaning warm or cold (1 day ahead)'));
-  box.appendChild(bias);
+  var list = mkEl('ul', 'bias small');
+  if (rain) {
+    // rain totals over the same days, 1 day ahead, next to what the gauge caught
+    list.appendChild(mkEl('li', '', 'Your station: ' + R.obsRain.toFixed(2) + ' in (' + R.wetDays + ' rain day' + (R.wetDays === 1 ? '' : 's') + ')'));
+    R.models.forEach(function (m) {
+      var l = m.lead[1]; if (l.rainTotal == null) return;
+      var d = l.rainTotal - R.obsRain, pct = R.obsRain > 0.05 ? Math.round(Math.abs(d) / R.obsRain * 100) : null;
+      list.appendChild(mkEl('li', '', m.label + ': ' + l.rainTotal.toFixed(2) + ' in' +
+        (pct === null || pct < 10 ? ' (about right)' : ' (' + pct + '% too ' + (d > 0 ? 'wet' : 'dry') + ')')));
+    });
+    box.appendChild(mkEl('p', 'small score-h', 'Rain totals (1 day ahead)'));
+  } else {
+    // which way each model leans, 1 day ahead
+    R.models.forEach(function (m) {
+      var l = m.lead[1]; if (l.biasHi == null) return;
+      function lean(v, what) { return Math.abs(v) < 0.5 ? what + ' about right' : what + ' ' + Math.abs(v).toFixed(1) + '° too ' + (v > 0 ? 'warm' : 'cold'); }
+      list.appendChild(mkEl('li', '', m.label + ': ' + lean(l.biasHi, 'highs') + ', ' + lean(l.biasLo, 'lows')));
+    });
+    box.appendChild(mkEl('p', 'small score-h', 'Leaning warm or cold (1 day ahead)'));
+  }
+  box.appendChild(list);
   var f = dsDate(R.first), t = dsDate(R.last), o = { month: 'short', day: 'numeric' }, missing = 0;
   for (var i = 1; i <= SCORE_DAYS; i++) if (!demo && obsDays && !obsDays[ymd(dayStart(i))]) missing++;
-  box.appendChild(mkEl('p', 'small muted', 'Average miss, in °F, of the daily ' + (scoreMode === 'both' ? 'high and low' : scoreMode === 'hi' ? 'high' : 'low') +
-    ' at your station over ' + R.n + ' days (' + f.toLocaleDateString([], o) + ' – ' + t.toLocaleDateString([], o) + '). Lower is better; the best in each column is highlighted.' +
+  var span = n0 + ' days (' + f.toLocaleDateString([], o) + ' – ' + t.toLocaleDateString([], o) + ')';
+  box.appendChild(mkEl('p', 'small muted', (rain
+    ? 'Share of days each model called right as a rain day (0.05 in or more) or a dry day, at your station over ' + span + '. Higher is better; the best in each column is highlighted. Rain is patchy, so a storm that misses your gauge by a few miles counts against a model.'
+    : 'Average miss, in °F, of the daily ' + (scoreMode === 'both' ? 'high and low' : scoreMode === 'hi' ? 'high' : 'low') + ' at your station over ' + span + '. Lower is better; the best in each column is highlighted.') +
     (missing ? ' ' + missing + ' more recent day' + (missing === 1 ? ' is' : 's are') + ' still loading.' : '')));
 }

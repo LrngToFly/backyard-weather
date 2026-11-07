@@ -84,9 +84,10 @@ function makeDemoAlerts() {
 function makeDemoAQ() { return { src: 'AirNow', area: 'Worcester (demo)', aqi: 38, main: 'PM2.5', tomorrow: { n: 2, name: 'Moderate', aqi: 55 } }; }
 function makeDemoScore() {
   var errs = { ecmwf: [1.3, 2.0, 2.9], gfs: [1.9, 2.6, 3.5], aifs: [1.2, 1.9, 2.7], aigfs: [1.6, 2.4, 3.4] };
-  return { n: 30, first: ymd(dayStart(30)), last: ymd(dayStart(1)), models: PT_MODELS.map(function (m) {
+  return { n: 30, rainN: 30, obsRain: 2.4, wetDays: 7, first: ymd(dayStart(30)), last: ymd(dayStart(1)), models: PT_MODELS.map(function (m) {
     var lead = {};
-    SCORE_LEADS.forEach(function (n, k) { var e = errs[m.id][k]; lead[n] = { hi: e + 0.2, lo: e - 0.2, both: e, biasHi: m.id === 'gfs' ? -1.4 : 0.6, biasLo: m.id === 'ecmwf' ? 0.9 : -0.3, n: 30 }; });
+    var rainPct = { ecmwf: [87, 80, 73], gfs: [80, 73, 67], aifs: [90, 83, 77], aigfs: [83, 77, 70] }[m.id], rainTot = { ecmwf: 3.1, gfs: 4.5, aifs: 2.6, aigfs: 2.0 }[m.id];
+    SCORE_LEADS.forEach(function (n, k) { var e = errs[m.id][k]; lead[n] = { hi: e + 0.2, lo: e - 0.2, both: e, biasHi: m.id === 'gfs' ? -1.4 : 0.6, biasLo: m.id === 'ecmwf' ? 0.9 : -0.3, n: 30, rain: rainPct[k], rainTotal: rainTot, rainN: 30 }; });
     return { id: m.id, label: m.label, lead: lead };
   }) };
 }
