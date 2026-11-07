@@ -29,7 +29,7 @@ function renderAll() { scheduleRender(); renderPoint(); renderHistory(); drawRad
 
 // ---------------------------------------------------------------- settings + diagnostics
 function openSettings() {
-  el('set-key').value = settings.apiKey; el('set-airnow').value = settings.airnowKey || ''; el('set-station').value = settings.stationId; el('set-detail').value = settings.detail;
+  el('set-key').value = settings.apiKey; el('set-airnow').value = settings.airnowKey || ''; el('set-amb-api').value = settings.ambientApiKey || ''; el('set-amb-app').value = settings.ambientAppKey || ''; el('set-station').value = settings.stationId; el('set-detail').value = settings.detail;
   el('set-demo').checked = !!demo; el('set-layout').value = settings.layout || 'auto';
   el('set-speed').value = clamp(+settings.playMs || 700, 250, 1500); showSpeed();
   var dlg = el('settings'); if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
@@ -39,6 +39,7 @@ function showSpeed() { el('speed-val').textContent = (el('set-speed').value / 10
 function saveSettings() {
   var changedDetail = el('set-detail').value !== settings.detail, oldStation = settings.stationId, oldAir = settings.airnowKey;
   settings.apiKey = el('set-key').value.trim(); settings.airnowKey = el('set-airnow').value.trim();
+  settings.ambientApiKey = el('set-amb-api').value.trim(); settings.ambientAppKey = el('set-amb-app').value.trim();
   settings.stationId = (el('set-station').value.trim() || 'KMAHOPKI22').toUpperCase(); settings.detail = el('set-detail').value;
   settings.playMs = +el('set-speed').value || 700; settings.layout = el('set-layout').value;
   store.set('wx.settings', settings);

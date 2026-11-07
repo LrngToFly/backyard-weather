@@ -78,14 +78,14 @@ var store = {
   set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } },
   del: function (k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
 };
-var settings = Object.assign({ apiKey: '', airnowKey: '', stationId: 'KMAHOPKI22', detail: 'fine', playMs: 700, layout: 'auto', snowRatio: 'ten' }, store.get('wx.settings', {}));
+var settings = Object.assign({ apiKey: '', airnowKey: '', ambientApiKey: '', ambientAppKey: '', stationId: 'KMAHOPKI22', detail: 'fine', playMs: 700, layout: 'auto', snowRatio: 'ten' }, store.get('wx.settings', {}));
 // local testing only (localhost): keys from keys.local.js fill in any that aren't saved; the live app never has this file
 if (window.LOCAL_KEYS) {
   var LK = window.LOCAL_KEYS;
   if (LK.wu && !settings.apiKey) settings.apiKey = LK.wu;
   if (LK.airnow && !settings.airnowKey) settings.airnowKey = LK.airnow;
-  if (LK.ambientApi) settings.ambientApiKey = LK.ambientApi;
-  if (LK.ambientApp) settings.ambientAppKey = LK.ambientApp;
+  if (LK.ambientApi && !settings.ambientApiKey) settings.ambientApiKey = LK.ambientApi;
+  if (LK.ambientApp && !settings.ambientAppKey) settings.ambientAppKey = LK.ambientApp;
 }
 var params = new URLSearchParams(location.search);
 var demo = params.get('demo') === '1' || store.get('wx.demo', false);
