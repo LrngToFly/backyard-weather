@@ -886,7 +886,7 @@
 
 
   // ---------------------------------------------------------------- station day charts (Weather Underground 5-minute history)
-  var hist = null, histOffset = 0, histFetchedAt = 0, histCache = {}, histMsg = 'Loading…', hoverT = null, hoverTimer = 0;
+  var hist = null, histOffset = 0, histFetchedAt = 0, histCache = {}, histMsg = 'Loading…', hoverT = null;
   function dayStartFor(offset) { var d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - offset); return d; }
   function ymd(d) { return d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()); }
   function num() { for (var i = 0; i < arguments.length; i++) { var v = arguments[i]; if (v !== null && v !== undefined && v !== '' && !isNaN(v)) return +v; } return null; }
@@ -1031,17 +1031,33 @@
       sum.textContent = 'High ' + fmt(hiT, 1) + '° · Low ' + fmt(loT, 1) + '° · Peak gust ' + fmt(pk, 1) + ' mph · Rain ' + fmt(rain, 2) + ' in';
     } else sum.textContent = '';
   }
-  function histPointer(e) {
+  // Touch: a tap (or a sideways slide) shows the readout and it stays; tapping again hides it. Scrolling past a chart does nothing.
+  var histTouch = null;
+  function histShow(e) {
     var cv = e.currentTarget, rect = cv.getBoundingClientRect(), cfg = HCHARTS.filter(function (c) { return c.id === cv.id; })[0];
     if (!cfg || !cfg._geo) return;
     var g = cfg._geo, x = e.clientX - rect.left;
     hoverT = g.t0 + clamp((x - g.L) / (g.W - g.L - g.R), 0, 1) * (g.t1 - g.t0);
-    clearTimeout(hoverTimer); renderHistory();
+    renderHistory();
   }
-  function histPointerEnd(e) {
-    clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(function () { hoverT = null; renderHistory(); }, e.pointerType === 'mouse' ? 50 : 3000);
+  function histHide() { if (hoverT !== null) { hoverT = null; renderHistory(); } }
+  function histDown(e) {
+    if (e.pointerType === 'mouse') { histShow(e); return; }
+    histTouch = { x: e.clientX, moved: false, wasOpen: hoverT !== null };
   }
+  function histMove(e) {
+    if (e.pointerType === 'mouse') { histShow(e); return; }
+    if (!histTouch) return;
+    if (!histTouch.moved && Math.abs(e.clientX - histTouch.x) > 8) histTouch.moved = true;
+    if (histTouch.moved) histShow(e);
+  }
+  function histUp(e) {
+    if (e.pointerType === 'mouse' || !histTouch) return;
+    if (!histTouch.moved) { if (histTouch.wasOpen) histHide(); else histShow(e); }
+    histTouch = null;
+  }
+  function histLeave(e) { if (e.pointerType === 'mouse') histHide(); }
+  function histCancel() { histTouch = null; }
   function setHistDay(delta) {
     histOffset = clamp(histOffset + delta, 0, 14); hoverT = null; loadHistory(false);
   }
@@ -1242,7 +1258,8 @@
     buildModelPicker(); buildLinks(); buildPtTabs();
     el('day-prev').addEventListener('click', function () { setHistDay(1); });
     el('day-next').addEventListener('click', function () { setHistDay(-1); });
-    HCHARTS.forEach(function (c) { var cv = el(c.id); cv.addEventListener('pointerdown', histPointer); cv.addEventListener('pointermove', histPointer); cv.addEventListener('pointerup', histPointerEnd); cv.addEventListener('pointerleave', histPointerEnd); cv.addEventListener('pointercancel', histPointerEnd); });
+    HCHARTS.forEach(function (c) { var cv = el(c.id); cv.addEventListener('pointerdown', histDown); cv.addEventListener('pointermove', histMove); cv.addEventListener('pointerup', histUp); cv.addEventListener('pointerleave', histLeave); cv.addEventListener('pointercancel', histCancel); });
+    document.addEventListener('pointerdown', function (e) { if (hoverT !== null && !(e.target.closest && e.target.closest('.hchart canvas'))) histHide(); });
     buildTabs(); updateBanner();
     el('model').addEventListener('change', function (e) { switchModel(e.target.value); });
     el('tt-model').addEventListener('change', function (e) { ttModelId = e.target.value; store.set('wx.ttmodel', ttModelId); buildLinks(); });
