@@ -20,11 +20,11 @@
     ['Concord', 43.21, -71.54], ['New York', 40.71, -74.0], ['Hyannis', 41.65, -70.28], ['Utica', 43.10, -75.23]
   ];
   var VIEWS = [
-    { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (in/hr)' },
-    { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (in/hr) colored by type' },
+    { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (mm/hr)' },
+    { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (mm/hr) colored by type' },
     { id: 'apcpn', label: 'Total Precip', tt: 'apcpn', sub: 'Precipitation accumulated since the first time shown (inches)' },
     { id: 'asnow', label: 'Total Snow', tt: 'asnow', sub: 'Snowfall accumulated since the first time shown (inches, 10:1 snow-to-water ratio)' },
-    { id: 't2m', label: '2m Temp', tt: 'T2m', sub: '2-metre air temperature (°F); cyan line = freezing' }
+    { id: 't2m', label: '2m Temp', tt: 'T2m', sub: '2-metre air temperature (°F); dark blue line = 32°F' }
   ];
   // Forecast models. ep/om = Open-Meteo endpoint and model name; tt = Tropical Tidbits model code.
   // type: Open-Meteo reports rain/snow type directly (otherwise it is worked out from the snowfall amount).
@@ -35,8 +35,6 @@
     { id: 'aigfs', label: 'AIGFS (AI)', short: 'AIGFS', ep: 'gfs', om: 'ncep_aigfs025', tt: 'aigfs', days: 8 },
     { id: 'rrfs', label: 'RRFS (3 km, 4 days)', short: 'RRFS', ep: 'gfs', om: 'ncep_rrfs_conus', tt: 'rrfs', days: 5, fine: true, noFrzn: true }
   ];
-  var SNOW_T = [0.1, 1, 2, 4, 6, 8, 12, 18, 24, 30, 36, 48];
-  var SNOW_C = ['#cfe3f7', '#9ec9f0', '#6aa8e6', '#3f83d8', '#2a5fc4', '#3a3fae', '#5a2f9e', '#7b2a94', '#a02c8c', '#c8368a', '#e8579b', '#f5a3c6'];
 
   // ---------------------------------------------------------------- helpers
   function el(id) { return document.getElementById(id); }
@@ -112,31 +110,88 @@
   function hex(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
 
   // ---------------------------------------------------------------- color tables
-  var TSTOPS = [[-30, '#d9c4ff'], [-20, '#a78bfa'], [-10, '#7c4dff'], [0, '#4a3fc0'], [10, '#3a62d6'], [20, '#3b8be3'],
-    [28, '#52b3ef'], [32, '#a9e7f7'], [34, '#8fdc9a'], [40, '#5fc46b'], [50, '#d8e65a'], [60, '#f7c548'], [70, '#f58f35'],
-    [80, '#e04a2b'], [90, '#b3172f'], [100, '#7b1048'], [110, '#4a0a40']];
+  // Colors and break points copied from Tropical Tidbits' own legends (precip rates in mm/hr, totals in inches).
+  var RATE_T = [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 30, 36, 42];
+  var RATE_C = [
+    '#99f26c', '#8bdc62', '#7cc558', '#6dae4d', '#5f9842', '#4f8038', '#406a2d', '#325424',
+    '#fafe74', '#ecd565', '#e1ac58', '#d8854b', '#d05138', '#b5413a', '#98343d', '#7d2a42',
+    '#a53ba0', '#bc45ba', '#d44fd4'
+  ];
+  var RAIN_T = [0.1, 0.25, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 30];
+  var RAIN_C = [
+    '#99f26c', '#8bdc62', '#7cc558', '#6dae4d', '#5f9842', '#4f8038', '#406a2d', '#325424',
+    '#fafe74', '#ecd565', '#e1ac58', '#d8854c', '#d05035', '#b5423b', '#96363c', '#7e2c3f',
+    '#9d3b97', '#d44fd4'
+  ];
+  var FRZ_T = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 8, 10, 12, 14];
+  var FRZR_C = [
+    '#e2a7be', '#d491af', '#cd89a5', '#c06f96', '#b9648b', '#ae537d', '#a2446f', '#993b63',
+    '#8c314d', '#923442', '#983738', '#a03f2c', '#ab4627', '#b24b26', '#be5424', '#c85b26',
+    '#d2632a'
+  ];
+  var SLEET_C = [
+    '#b19df6', '#b091f6', '#b17ef6', '#af72f3', '#ab64ee', '#a453e4', '#9842d4', '#913bc9',
+    '#8230ac', '#8331a9', '#8e3581', '#963c8e', '#9b4084', '#a44779', '#ab4f6f', '#b35765',
+    '#b95c5c'
+  ];
+  var SNOWR_C = [
+    '#a4f7fd', '#97e2f7', '#88c9f9', '#7fb8f8', '#74a6f7', '#6890f6', '#5167e1', '#4552d4',
+    '#3a3ec6', '#302cb5', '#2a1fa9', '#270e95', '#2c1290', '#441f81', '#8a3280', '#ad3e81',
+    '#cf4b7d'
+  ];
+  var ACC_T = [0.01, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8, 9, 10, 12, 14, 16, 20, 24];
+  var ACC_C = [
+    '#c8e9d1', '#b1d4ba', '#99bda1', '#81a688', '#6a8f70', '#547a58', '#3c5e3d', '#436184',
+    '#5b7a9a', '#7291b1', '#8ba9c4', '#a5c1db', '#bfd8ef', '#e4d7e9', '#d1c0d6', '#bcaac2',
+    '#a892af', '#947b9c', '#81648a', '#6c4d76', '#593662', '#571b32', '#6f343c', '#8c5448',
+    '#a77655', '#c59962', '#e6c97b', '#ead688', '#f1e493', '#f6f1a0', '#fcfeac'
+  ];
+  var SNOW_T = [0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48];
+  var SNOW_C = [
+    '#444696', '#585ea3', '#6d77b0', '#8390bf', '#98a8cd', '#aec2db', '#b6bee0', '#a8a0d8',
+    '#9d86d1', '#926bc9', '#8a52c0', '#7e3bb4', '#a35294', '#a75d9a', '#ae68a2', '#b473a9',
+    '#b678ac', '#bf8bb7', '#c697bf', '#cba3c7', '#d2afce', '#d9bcd7', '#dfc8dd', '#e7d5e5',
+    '#deefe7', '#cfe7dc', '#c0dfd0', '#b1d8c6', '#a3d0ba', '#97caaf', '#7fb395', '#74a488',
+    '#69957c', '#5a816b', '#517561', '#466854', '#4a477d', '#555380', '#616082', '#6e6c87',
+    '#757485', '#85858d', '#9d9d94', '#a9aaa0', '#b6b7ad', '#c3c4ba', '#d1d1c7', '#ddddd4',
+    '#e9eae0'
+  ];
+  // 2 m temperature: one color per degree F from -70 to 130, blended to quarter degrees
+  var TMIN = -70, TMAX = 130;
+  var TCOL = [
+    '#ddc7ec', '#dfc3ed', '#d9b2e6', '#d9aee5', '#d7a2dc', '#d49dd3', '#d295cb', '#d393c8', '#d182be', '#d07bba',
+    '#cf74b6', '#cf73b5', '#cf69ad', '#ce5ea2', '#ce5b9f', '#ce5a9e', '#cf5191', '#cf5191', '#cc4c85', '#cb4b81',
+    '#cb4b81', '#cb4b81', '#cb4b81', '#cb4b81', '#c84a82', '#c64a82', '#c04982', '#bf4982', '#bc4982', '#bc4982',
+    '#bb4982', '#ba4982', '#b74a82', '#b74a82', '#b14b83', '#af4c83', '#af4c83', '#af4c83', '#ae4e85', '#ad4f85',
+    '#ac528a', '#aa578e', '#ab5890', '#ab5890', '#ae649f', '#af69a3', '#b06da8', '#b06da8', '#b171ac', '#b47eb9',
+    '#b07ebc', '#b07ebc', '#a275b8', '#976db5', '#9369b2', '#8b63b0', '#815dac', '#8058a9', '#6f53a3', '#6f53a3',
+    '#6f53a3', '#7054a3', '#7863ae', '#8a77b9', '#8f7ebb', '#9d8ec6', '#a299ce', '#afabd7', '#b4b2db', '#cfd0e0',
+    '#cacadf', '#b9b7dc', '#b3b0da', '#a49ed0', '#9893cc', '#8987ca', '#8080cb', '#736fc2', '#726abb', '#5752b3',
+    '#5752b3', '#5752b3', '#5754b7', '#575bc2', '#575bc2', '#5a65cf', '#5c6bd6', '#5d6cd7', '#5f71dc', '#637be5',
+    '#6682eb', '#6a8af0', '#6c8ff1', '#75a1f5', '#7baff7', '#7db1f8', '#80b8f8', '#8ccefa', '#91d5fa', '#98e2fb',
+    '#9ceafc', '#a4f7fd', '#a2e8bc', '#a1dd9d', '#9cda96', '#95d28a', '#91ce83', '#8ac778', '#85c270', '#7fbc64',
+    '#7bb85e', '#74b254', '#70ad4e', '#6aa644', '#67a23f', '#619a36', '#5e9733', '#669e37', '#6ca33b', '#77ac42',
+    '#7db146', '#8bba4f', '#93bf54', '#a1c95d', '#aace63', '#bad86c', '#c3de72', '#d3e77c', '#dded81', '#edf68c',
+    '#f8fc92', '#f7f68e', '#f4ee8a', '#f1e484', '#edde80', '#e9d279', '#e6cb75', '#e2c270', '#e0bc6c', '#deb164',
+    '#dbaa61', '#d59d57', '#d09652', '#ca8949', '#c78143', '#c1743a', '#bc6d35', '#b7612d', '#b45a28', '#b05325',
+    '#a7451e', '#a13f1c', '#a13f1c', '#973b1f', '#933920', '#903823', '#903823', '#87352b', '#84342f', '#803333',
+    '#803333', '#843839', '#84393b', '#8f4447', '#94494d', '#994f53', '#9d5457', '#a85f61', '#b2696a', '#b66e70',
+    '#bb7378', '#c88089', '#ca8390', '#d08da7', '#d290ae', '#dba0c4', '#dba2cc', '#e2add5', '#e3b6e0', '#e4c0ee',
+    '#e5c5f4', '#e0bcee', '#dbb1e8', '#d3a8e3', '#c89dde', '#bd91d9', '#b98dd5', '#b083cb', '#a97ac2', '#9a6fb7',
+    '#8e64b0', '#8359ab', '#8153a4', '#7e4897', '#7c418f', '#7b3c88', '#7a3a86', '#78347c', '#77337a', '#732a67',
+    '#752b5d'
+  ];
   var TLUT = (function () {
-    var out = [];
-    for (var v = -30; v <= 110; v += 0.5) {
-      var k = 0; while (k < TSTOPS.length - 2 && v > TSTOPS[k + 1][0]) k++;
-      var a = TSTOPS[k], b = TSTOPS[k + 1];
-      var f = clamp((v - a[0]) / (b[0] - a[0]), 0, 1);
-      var ca = hex(a[1]), cb = hex(b[1]);
-      out.push([ca[0] + (cb[0] - ca[0]) * f, ca[1] + (cb[1] - ca[1]) * f, ca[2] + (cb[2] - ca[2]) * f]);
+    var out = [], base = TCOL.map(hex);
+    for (var v = TMIN; v <= TMAX; v += 0.25) {
+      var i = Math.min(Math.floor(v - TMIN), base.length - 2), f = v - TMIN - i, a = base[i], b = base[i + 1];
+      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]);
     }
     return out;
   })();
-  var RATE_T = [0.004, 0.01, 0.02, 0.04, 0.07, 0.1, 0.15, 0.25, 0.4, 0.7, 1.0];
-  var PAL = {
-    rain: ['#2c8a4a', '#3cae4e', '#6fcf4e', '#b9e64a', '#f4e242', '#f7b43a', '#f27a2f', '#e0422b', '#c01f2f', '#a1177e', '#d79bef'],
-    snow: ['#a9cff0', '#7fb3ea', '#5593e0', '#3a72d4', '#2f54c0', '#3a3fa8', '#53329e', '#7430ad', '#9a38c4', '#c070de', '#e2b0f1'],
-    mix: ['#ffd9a8', '#ffc27a', '#ffa94d', '#ff8a2b', '#f06d1a', '#d95510', '#bf400d', '#a32d0c', '#8a1f0f', '#6e1410', '#52100f'],
-    frz: ['#ffc9d6', '#ff9fb8', '#ff7599', '#ff4a7c', '#e62a63', '#c01a50', '#9a1040', '#7a0b34', '#5e0829', '#44061f', '#2e0415']
-  };
-  var ACC_T = [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6];
-  var ACC_C = ['#cfe8d0', '#9bd5a4', '#64bd77', '#34a05a', '#1f8a5f', '#1d7f8f', '#2663b5', '#3a47b8', '#5a35a8', '#7d2d9c', '#a82a8a', '#d63a6d'];
-  var RGB = {};
-  Object.keys(PAL).forEach(function (k) { RGB[k] = PAL[k].map(hex); });
+  function tIdx(v) { return clamp(Math.round((v - TMIN) * 4), 0, TLUT.length - 1); }
+  function band(v, T) { if (!(v >= T[0])) return -1; var k = 0; while (k < T.length - 1 && v >= T[k + 1]) k++; return k; }
+  var RATE_RGB = RATE_C.map(hex), RAIN_RGB = RAIN_C.map(hex), FRZR_RGB = FRZR_C.map(hex), SLEET_RGB = SLEET_C.map(hex), SNOWR_RGB = SNOWR_C.map(hex);
   var ACC_RGB = ACC_C.map(hex);
   var SNOW_RGB = SNOW_C.map(hex);
 
@@ -555,25 +610,23 @@
         var x0 = X0[px], tx = TX[px], o = (py * w + px) * 4, rgb = null, alpha = 0, k, v;
         if (view === 't2m') {
           v = bil(g.t2, x0, tx, y0, ty);
-          rgb = TLUT[clamp(Math.round((v + 30) * 2), 0, TLUT.length - 1)]; alpha = 238;
+          rgb = TLUT[tIdx(v)]; alpha = 240;
         } else if (view === 'apcpn') {
-          v = bil(g.acc, x0, tx, y0, ty);
-          if (v >= ACC_T[0]) { k = 0; while (k < ACC_T.length - 1 && v >= ACC_T[k + 1]) k++; rgb = ACC_RGB[k]; alpha = 228; }
+          v = bil(g.acc, x0, tx, y0, ty); k = band(v, ACC_T);
+          if (k >= 0) { rgb = ACC_RGB[k]; alpha = 235; }
         } else if (view === 'asnow') {
-          v = bil(g.snacc, x0, tx, y0, ty);
-          if (v >= SNOW_T[0]) { k = 0; while (k < SNOW_T.length - 1 && v >= SNOW_T[k + 1]) k++; rgb = SNOW_RGB[k]; alpha = 232; }
+          v = bil(g.snacc, x0, tx, y0, ty); k = band(v, SNOW_T);
+          if (k >= 0) { rgb = SNOW_RGB[k]; alpha = 235; }
         } else {
-          v = bil(g.rate, x0, tx, y0, ty);
-          if (v >= RATE_T[0]) {
-            k = 0; while (k < RATE_T.length - 1 && v >= RATE_T[k + 1]) k++;
-            var pal = 'rain';
-            if (view === 'mslp_pcpn_frzn') {
-              var fs = bil(g.fs, x0, tx, y0, ty), fm = bil(g.fm, x0, tx, y0, ty), ff = bil(g.ff, x0, tx, y0, ty), best = 1 - (fs + fm + ff);
-              if (fs > best) { pal = 'snow'; best = fs; }
-              if (fm > best) { pal = 'mix'; best = fm; }
-              if (ff > best) { pal = 'frz'; }
-            }
-            rgb = RGB[pal][k]; alpha = 226;
+          v = bil(g.rate, x0, tx, y0, ty) * 25.4; // inches/hr -> mm/hr, as on Tropical Tidbits
+          if (view === 'mslp_pcpn_frzn') {
+            var fs = bil(g.fs, x0, tx, y0, ty), fm = bil(g.fm, x0, tx, y0, ty), ff = bil(g.ff, x0, tx, y0, ty), best = 1 - (fs + fm + ff), pal = RAIN_RGB, T = RAIN_T;
+            if (fs > best) { pal = SNOWR_RGB; T = FRZ_T; best = fs; }
+            if (fm > best) { pal = SLEET_RGB; T = FRZ_T; best = fm; }
+            if (ff > best) { pal = FRZR_RGB; T = FRZ_T; }
+            k = band(v, T); if (k >= 0) { rgb = pal[k]; alpha = 235; }
+          } else {
+            k = band(v, RATE_T); if (k >= 0) { rgb = RATE_RGB[k]; alpha = 235; }
           }
         }
         if (rgb) { data[o] = rgb[0]; data[o + 1] = rgb[1]; data[o + 2] = rgb[2]; data[o + 3] = alpha; }
@@ -685,32 +738,42 @@
   }
   function drawLegend() {
     var cv = el('legend'), W = Math.floor(el('map-wrap').getBoundingClientRect().width) || 340, dpr = Math.min(window.devicePixelRatio || 1, 3);
-    var rows = view === 'mslp_pcpn_frzn' ? 2 : 1, H = rows === 2 ? 62 : 40;
+    var frzn = view === 'mslp_pcpn_frzn', H = frzn ? 4 * 30 + 2 : 40;
     cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     var css = getComputedStyle(document.documentElement), txt = css.getPropertyValue('--muted').trim() || '#667';
-    ctx.font = '10px -apple-system, system-ui, sans-serif'; ctx.fillStyle = txt; ctx.textAlign = 'center';
-    var x0 = 4, bw = W - 8, y = 2, i;
+    ctx.font = '10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+    var i;
+    // equal-width color boxes like the Tropical Tidbits color bars; a label sits on a box's left edge (its lower limit)
+    function bins(x0, bw, yy, thr, cols, wanted) {
+      var n = thr.length, cw = bw / n, k;
+      for (k = 0; k < n; k++) { ctx.fillStyle = cols[k]; ctx.fillRect(x0 + k * cw, yy, cw + 0.6, 12); }
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 0.6; ctx.strokeRect(x0, yy, bw, 12);
+      ctx.fillStyle = txt; var last = -1e9;
+      for (k = 0; k < n; k++) {
+        if (wanted && wanted.indexOf(thr[k]) < 0) continue;
+        var lab = String(thr[k]), w = ctx.measureText(lab).width, cx = clamp(x0 + k * cw, x0 + w / 2, x0 + bw - w / 2);
+        if (cx - w / 2 < last + 3) continue;
+        ctx.fillText(lab, cx, yy + 23); ctx.fillRect(x0 + k * cw - 0.3, yy + 12, 0.6, 3); last = cx + w / 2;
+      }
+    }
     if (view === 't2m') {
-      for (i = 0; i < bw; i++) { var v = -20 + (i / bw) * 120, c = TLUT[clamp(Math.round((v + 30) * 2), 0, TLUT.length - 1)]; ctx.fillStyle = 'rgb(' + c.map(Math.round).join(',') + ')'; ctx.fillRect(x0 + i, y, 1.5, 14); }
-      ctx.fillStyle = txt; for (var t = -20; t <= 100; t += 20) ctx.fillText(t + '°', clamp(x0 + (t + 20) / 120 * bw, 16, W - 16), 28);
+      var lo = -40, hi = 110, bw = W - 8;
+      for (i = 0; i < bw; i++) { var c = TLUT[tIdx(lo + (i / bw) * (hi - lo))]; ctx.fillStyle = 'rgb(' + c.map(Math.round).join(',') + ')'; ctx.fillRect(4 + i, 2, 1.5, 12); }
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 0.6; ctx.strokeRect(4, 2, bw, 12);
+      ctx.fillStyle = txt; for (var t = lo; t <= hi - 10; t += 20) ctx.fillText(t + '°', clamp(4 + (t - lo) / (hi - lo) * bw, 12, W - 12), 27);
       return;
     }
-    function bins(thr, cols, labelFmt, yy) {
-      var n = thr.length, cw = bw / n;
-      for (var k = 0; k < n; k++) { ctx.fillStyle = cols[k]; ctx.fillRect(x0 + k * cw, yy, cw + 0.5, 14); }
-      ctx.fillStyle = txt; for (k = 0; k < n; k += (n > 11 ? 2 : 2)) ctx.fillText(labelFmt(thr[k]), x0 + k * cw + cw / 2, yy + 26);
-    }
-    if (view === 'apcpn') { bins(ACC_T, ACC_C, function (v) { return String(v); }, y); return; }
-    if (view === 'asnow') { bins(SNOW_T, SNOW_C, function (v) { return String(v); }, y); return; }
-    bins(RATE_T, PAL.rain, function (v) { return String(v); }, y);
-    if (view === 'mslp_pcpn_frzn') {
-      var types = [['Rain', PAL.rain[1]], ['Mix', PAL.mix[3]], ['Snow', PAL.snow[2]], ['Freezing', PAL.frz[3]]], cw2 = bw / 4;
-      types.forEach(function (tp, k) {
-        ctx.fillStyle = tp[1]; ctx.fillRect(x0 + k * cw2 + 4, 44, 12, 12);
-        ctx.fillStyle = txt; ctx.textAlign = 'left'; ctx.fillText(tp[0], x0 + k * cw2 + 20, 54); ctx.textAlign = 'center';
-      });
-    }
+    if (view === 'apcpn') { bins(4, W - 8, 2, ACC_T, ACC_C, [0.01, 0.1, 0.3, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 14, 20, 24]); return; }
+    if (view === 'asnow') { bins(4, W - 8, 2, SNOW_T, SNOW_C, [0.1, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48]); return; }
+    if (!frzn) { bins(4, W - 8, 2, RATE_T, RATE_C, null); return; }
+    var wr = [0.1, 0.5, 1.5, 2.5, 4, 6, 10, 16, 24], wf = [0.1, 0.5, 1, 2, 3, 4, 6, 10, 14]; // the same labels Tropical Tidbits prints
+    var rows = [['Rain', RAIN_T, RAIN_C, wr], ['FrzR', FRZ_T, FRZR_C, wf], ['Sleet', FRZ_T, SLEET_C, wf], ['Snow', FRZ_T, SNOWR_C, wf]];
+    rows.forEach(function (r, q) {
+      ctx.fillStyle = txt; ctx.textAlign = 'left'; ctx.font = '600 10px -apple-system, system-ui, sans-serif'; ctx.fillText(r[0], 4, 2 + q * 30 + 10);
+      ctx.font = '10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+      bins(44, W - 48, 2 + q * 30, r[1], r[2], r[3]);
+    });
   }
 
   // ---------------------------------------------------------------- map UI
