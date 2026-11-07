@@ -12,7 +12,7 @@
   var OM = 'https://api.open-meteo.com/v1/ecmwf';
   var OM_BASE = 'https://api.open-meteo.com/v1/';
   var TT_BASE = 'https://www.tropicaltidbits.com/analysis/models/?region=neus';
-  var CACHE_VER = 5; // bump when the saved-map format changes
+  var CACHE_VER = 6; // bump when the saved-map format changes
   var GRID_TTL = 2 * 3600 * 1000; // reuse saved model data for 2 hours
   var CITIES = [
     ['Boston', 42.36, -71.06], ['Hartford', 41.76, -72.67], ['Providence', 41.82, -71.41],
@@ -24,7 +24,9 @@
     { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (in/hr) colored by type. Dashed lines: 1000–500 mb thickness (blue = 540 dam)' },
     { id: 'apcpn', label: 'Total Precip', tt: 'apcpn', sub: 'Precipitation accumulated since the first time shown (inches)' },
     { id: 'asnow', label: 'Total Snow', tt: 'asnow', sub: 'Snowfall accumulated since the first time shown (inches, 10:1 snow-to-water ratio)' },
-    { id: 't2m', label: '2m Temp', tt: 'T2m', sub: '2-metre air temperature (°F); dark blue line = 32°F' }
+    { id: 't2m', label: '2m Temp', tt: 'T2m', sub: '2-metre air temperature (°F); dark blue line = 32°F' },
+    { id: 'dew', label: '2m Dewpoint', tt: 'Td2m', sub: '2-metre dewpoint (°F), with sea-level pressure lines' },
+    { id: 'wind', label: '10m Wind', tt: 'mslp_wind', sub: 'Wind at 10 metres: speed shaded in mph, barbs in knots (a long barb is 10 kt, a short one 5 kt, a flag 50 kt), sea-level pressure lines (hPa)' }
   ];
   // Forecast models. ep/om = Open-Meteo endpoint and model name; tt = Tropical Tidbits model code.
   // type: Open-Meteo reports rain/snow type directly (otherwise it is worked out from the snowfall amount).
@@ -195,6 +197,55 @@
   var ACC_RGB = ACC_C.map(hex);
   var SNOW_RGB = SNOW_C.map(hex);
 
+  // 2 m dewpoint: one color per degree F from -90 to 130 (Tropical Tidbits' color bar), blended to quarter degrees
+  var DMIN = -90, DMAX = 130;
+  var DCOL = [
+    '#769eec', '#769eec', '#769eec', '#769eec', '#769eec', '#4c669a', '#2f3f61', '#769eec', '#769eec', '#769eec',
+    '#769eec', '#769eec', '#769eec', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#f7f2fb',
+    '#e2c9f0', '#dfc8e9', '#dab8e5', '#dbaee3', '#d8a7dc', '#d49dd4', '#d393cc', '#d28dc4', '#d28dc4', '#d07dba',
+    '#d07dba', '#cf6daf', '#ce66aa', '#ce64a8', '#cd5fa3', '#cc599c', '#cc579a', '#cb4c85', '#cb4c85', '#cb4c85',
+    '#cb4c85', '#cb4c85', '#cb4c85', '#cb4c85', '#c94b85', '#c24a83', '#c24a83', '#bf4982', '#bf4982', '#bf4982',
+    '#bd4982', '#b84a83', '#b64a83', '#b44b83', '#b44b83', '#b44b83', '#b44b83', '#af4d83', '#af5089', '#a84c83',
+    '#ac5087', '#ae548e', '#ac5b94', '#ac5b94', '#ac5f9b', '#ac5f9b', '#ac669e', '#ac72aa', '#ad78b2', '#b67db1',
+    '#b684c1', '#a77bb5', '#a673b9', '#9d71b8', '#936bb3', '#8e6ab3', '#8561ad', '#7954a6', '#7851a2', '#714ca3',
+    '#6f55a4', '#7154a6', '#7c61a8', '#8774b5', '#8874b8', '#9d91c6', '#a297cb', '#b3acd9', '#b9b7dd', '#d2d2de',
+    '#d2d2de', '#b9b7dd', '#b9b7dd', '#a19ed1', '#9c98cf', '#8b83c4', '#867cc0', '#7773bd', '#6f69bc', '#5757bc',
+    '#5757bc', '#5757bc', '#5757bc', '#5757bc', '#5759be', '#5c67d1', '#595fc5', '#6072df', '#6174e2', '#6174e2',
+    '#6174e2', '#6b8feb', '#6f97ee', '#75a3f2', '#77a7f3', '#7fb6f7', '#81b9f7', '#8bccf9', '#8dcffa', '#98e3fb',
+    '#9ae5fc', '#a4f7fd', '#a2f2e7', '#a1dd9d', '#9fdc9b', '#95d28a', '#94d188', '#8ac778', '#88c675', '#7fbc64',
+    '#7dbb62', '#74b254', '#73b052', '#6aa644', '#69a442', '#619a36', '#609935', '#669e37', '#68a038', '#77ac42',
+    '#79ae43', '#8bba4f', '#8ebc51', '#a1c95d', '#a4cb5f', '#bad86c', '#bdda6e', '#d3e77c', '#d7e97e', '#edf68c',
+    '#f1f88e', '#f7f68e', '#f6f38d', '#f1e484', '#efe283', '#e9d279', '#e8d078', '#e2c270', '#e0ba6a', '#dbb466',
+    '#dcb668', '#cfa15a', '#cfa15a', '#c68344', '#c68344', '#c37a3e', '#bf7239', '#b7602d', '#b7602d', '#b05225',
+    '#ad4e23', '#a03e1c', '#a03e1c', '#973b1e', '#973b1e', '#8f3722', '#8f3722', '#87352b', '#8b3626', '#803333',
+    '#803333', '#803533', '#803933', '#904447', '#954b4e', '#9c5357', '#9c5357', '#a96065', '#b1686d', '#b56c6d',
+    '#bc7576', '#c38094', '#c38097', '#c786a7', '#c887a9', '#d99cca', '#dda6d0', '#deacd6', '#deacd6', '#e5c5f4',
+    '#e5c5f4', '#dfb9ec', '#deb8ec', '#d4a9e3', '#d4a9e3', '#be92d5', '#b88bd1', '#ae82c8', '#b182c8', '#a072b8',
+    '#926cb4', '#815ca9', '#8157a3', '#774a99', '#774a99', '#763a85', '#763a83', '#763074', '#763074', '#763074',
+    '#763074'
+  ];
+  var DLUT = (function () {
+    var out = [], base = DCOL.map(hex);
+    for (var v = DMIN; v <= DMAX; v += 0.25) {
+      var i = Math.min(Math.floor(v - DMIN), base.length - 2), f = v - DMIN - i, a = base[i], b = base[i + 1];
+      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]);
+    }
+    return out;
+  })();
+  function dIdx(v) { return clamp(Math.round((v - DMIN) * 4), 0, DLUT.length - 1); }
+  // 10 m wind speed: Tropical Tidbits bands, 2 knots wide from 4 kt (below 4 kt stays white). Shaded on those knot break points, labelled in mph.
+  var WIND_T = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86];
+  var WIND_C = [
+    '#bdf9fd', '#ade7ef', '#9ed7e1', '#90c6d3', '#81b6c4', '#74a7b7', '#6796a9', '#5a879c',
+    '#6dad4a', '#7cbc58', '#95cc66', '#b3db74', '#d6ed83', '#fafd93', '#f0df6e', '#e1ad56',
+    '#d77e3f', '#d15b2c', '#cf4a22', '#af3e1b', '#8e3015', '#6e230d', '#4f1b12', '#9438f4',
+    '#9f45f4', '#ac5cf4', '#bc78f6', '#cd97f7', '#dfb7f9', '#f1d7fb', '#eccbe7', '#e9bdd3',
+    '#e4afc0', '#e0a2ad', '#dd969b', '#d98683', '#d87e77', '#d57060', '#bf6057', '#a95050',
+    '#924148', '#7d3143'
+  ];
+  var WIND_RGB = WIND_C.map(hex);
+  var KT2MPH = 1.15078;
+
   // ---------------------------------------------------------------- model data
   var gridData = null;   // maps
   var pointData = null;  // backyard series
@@ -248,7 +299,7 @@
     for (j = 0; j < spec.ny; j++) for (i = 0; i < spec.nx; i++) pts.push([spec.lats[j], spec.lons[i]]);
     var CH = 100, chunks = [];
     for (var k = 0; k < pts.length; k += CH) chunks.push(pts.slice(k, k + CH));
-    var vars = 'pressure_msl,precipitation,temperature_2m,snowfall,geopotential_height_500hPa,geopotential_height_1000hPa' + (useType ? ',precipitation_type' : '');
+    var vars = 'pressure_msl,precipitation,temperature_2m,snowfall,geopotential_height_500hPa,geopotential_height_1000hPa,dew_point_2m,wind_speed_10m,wind_direction_10m' + (useType ? ',precipitation_type' : '');
     var results = new Array(chunks.length), next = 0;
     async function worker() {
       while (next < chunks.length) {
@@ -256,7 +307,7 @@
         var lat = chunks[c].map(function (p) { return p[0]; }).join(',');
         var lon = chunks[c].map(function (p) { return p[1]; }).join(',');
         var url = OM_BASE + M.ep + '?latitude=' + lat + '&longitude=' + lon + '&hourly=' + vars +
-          '&models=' + M.om + '&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&timezone=GMT&forecast_days=' + M.days;
+          '&models=' + M.om + '&temperature_unit=fahrenheit&precipitation_unit=inch&wind_speed_unit=kn&timeformat=unixtime&timezone=GMT&forecast_days=' + M.days;
         var arr;
         try { arr = await omFetch(url); }
         catch (e) {
@@ -272,14 +323,14 @@
     var first = pick(results[0][0].hourly, 'time'), nt = first.length, npts = pts.length;
     var d = {
       detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: Float64Array.from(first), fetchedAt: Date.now(),
-      p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), th: new Float32Array(npts * nt),
+      p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), th: new Float32Array(npts * nt), dw: new Float32Array(npts * nt), ws: new Float32Array(npts * nt), wd: new Float32Array(npts * nt),
       pt: useType ? new Int8Array(npts * nt) : null, hasType: !!useType, model: M.om, hLast: 0
     };
     var base = 0;
     results.forEach(function (arr, c) {
       arr.forEach(function (loc, q) {
         var h = loc.hourly, idx = (c * CH + q) * nt;
-        var P = pick(h, 'pressure_msl'), R = pick(h, 'precipitation'), T = pick(h, 'temperature_2m'), S = pick(h, 'snowfall'), Z5 = pick(h, 'geopotential_height_500hPa'), Z1 = pick(h, 'geopotential_height_1000hPa'), Y = useType ? pick(h, 'precipitation_type') : null;
+        var P = pick(h, 'pressure_msl'), R = pick(h, 'precipitation'), T = pick(h, 'temperature_2m'), S = pick(h, 'snowfall'), Z5 = pick(h, 'geopotential_height_500hPa'), Z1 = pick(h, 'geopotential_height_1000hPa'), Y = useType ? pick(h, 'precipitation_type') : null, DW = pick(h, 'dew_point_2m'), WS = pick(h, 'wind_speed_10m'), WD = pick(h, 'wind_direction_10m');
         for (var x = 0; x < nt; x++) {
           d.p[idx + x] = P && P[x] !== null ? P[x] : NaN;
           d.pr[idx + x] = R && R[x] !== null ? R[x] : NaN;
@@ -288,6 +339,9 @@
           d.sn[idx + x] = S && S[x] !== null ? S[x] * 10 / 7 : NaN;
           // 1000-500 mb thickness in decameters (dam), the rain/snow guide Tropical Tidbits draws as dashed lines
           d.th[idx + x] = Z5 && Z1 && Z5[x] !== null && Z1[x] !== null ? (Z5[x] - Z1[x]) / 10 : NaN;
+          d.dw[idx + x] = DW && DW[x] !== null ? DW[x] : NaN;
+          d.ws[idx + x] = WS && WS[x] !== null ? WS[x] : NaN;
+          d.wd[idx + x] = WD && WD[x] !== null ? WD[x] : NaN;
           if (P && P[x] !== null && x > d.hLast) d.hLast = x;
           if (useType) d.pt[idx + x] = Y && Y[x] !== null ? Y[x] : -1;
         }
@@ -517,9 +571,13 @@
     var prevH = si > 0 ? d.steps[si - 1].h : h - 3, dt = Math.max(1, h - prevH);
     var mslp = new Float32Array(npts), th = new Float32Array(npts), t2 = new Float32Array(npts), rate = new Float32Array(npts), acc = new Float32Array(npts), snacc = new Float32Array(npts);
     var fs = new Float32Array(npts), fm = new Float32Array(npts), ff = new Float32Array(npts);
+    var dw = new Float32Array(npts), uu = new Float32Array(npts), vv = new Float32Array(npts);
     for (var p = 0; p < npts; p++) {
       var base = p * nt;
       mslp[p] = d.p[base + h]; t2[p] = d.t[base + h]; th[p] = d.th ? d.th[base + h] : NaN;
+      dw[p] = d.dw ? d.dw[base + h] : NaN;
+      var wsp = d.ws ? d.ws[base + h] : NaN, wdr = d.wd ? d.wd[base + h] : NaN;
+      if (wsp === wsp && wdr === wdr) { uu[p] = -wsp * Math.sin(wdr * Math.PI / 180); vv[p] = -wsp * Math.cos(wdr * Math.PI / 180); } else { uu[p] = NaN; vv[p] = NaN; }
       var sum = 0, cnt = 0, k, v;
       for (k = Math.max(0, h - dt + 1); k <= h; k++) { v = d.pr[base + k]; if (v === v) { sum += v; cnt++; } }
       rate[p] = cnt ? sum / cnt : 0;
@@ -547,10 +605,13 @@
     fillNaN(mslp, 1013); fillNaN(t2, 40);
     var hasTh = false; for (var q0 = 0; q0 < npts; q0++) if (th[q0] === th[q0]) { hasTh = true; break; }
     if (hasTh) fillNaN(th, 552);
+    var hasDew = false, hasWind = false; for (var q1 = 0; q1 < npts; q1++) { if (dw[q1] === dw[q1]) hasDew = true; if (uu[q1] === uu[q1]) hasWind = true; }
+    if (hasDew) fillNaN(dw, 40); if (hasWind) { fillNaN(uu, 0); fillNaN(vv, 0); }
     var K2 = spec.step <= 0.25 ? 2 : 4;
     var g = {
       K: K2, nxu: (spec.nx - 1) * K2 + 1, nyu: (spec.ny - 1) * K2 + 1, spec: spec, deg: spec.step / K2,
       mslp: upCubic(mslp, spec.nx, spec.ny, K2), th: hasTh ? upCubic(th, spec.nx, spec.ny, K2) : null, t2: upCubic(t2, spec.nx, spec.ny, K2),
+      dw: hasDew ? upCubic(dw, spec.nx, spec.ny, K2) : null, u: hasWind ? upBilinear(uu, spec.nx, spec.ny, K2) : null, v: hasWind ? upBilinear(vv, spec.nx, spec.ny, K2) : null,
       rate: upBilinear(rate, spec.nx, spec.ny, K2), acc: upBilinear(acc, spec.nx, spec.ny, K2), snacc: upBilinear(snacc, spec.nx, spec.ny, K2),
       fs: upBilinear(fs, spec.nx, spec.ny, K2), fm: upBilinear(fm, spec.nx, spec.ny, K2), ff: upBilinear(ff, spec.nx, spec.ny, K2)
     };
@@ -650,6 +711,10 @@
         if (view === 't2m') {
           v = bil(g.t2, x0, tx, y0, ty);
           rgb = TLUT[tIdx(v)]; alpha = 240;
+        } else if (view === 'dew') {
+          if (g.dw) { v = bil(g.dw, x0, tx, y0, ty); rgb = DLUT[dIdx(v)]; alpha = 240; }
+        } else if (view === 'wind') {
+          if (g.u) { v = Math.hypot(bil(g.u, x0, tx, y0, ty), bil(g.v, x0, tx, y0, ty)); k = band(v, WIND_T); if (k >= 0) { rgb = WIND_RGB[k]; alpha = 240; } }
         } else if (view === 'apcpn') {
           v = bil(g.acc, x0, tx, y0, ty); k = band(v, ACC_T);
           if (k >= 0) { rgb = ACC_RGB[k]; alpha = 235; }
@@ -703,6 +768,12 @@
           pathChain(ctx, ch, g, proj); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3.4; ctx.stroke();
           ctx.strokeStyle = '#0a2a6e'; ctx.lineWidth = 1.6; ctx.stroke();
         });
+      } else if (view === 'dew') {
+        if (g.dw) drawPressure(ctx, g, proj, { thick: false, labels: false, extremes: false });
+        else noData(ctx, W, H, curModel().short + ' does not provide dewpoint');
+      } else if (view === 'wind') {
+        if (g.u) { drawPressure(ctx, g, proj, { thick: false }); drawBarbs(ctx, g, proj, W, H); }
+        else noData(ctx, W, H, curModel().short + ' does not provide wind');
       } else if (view !== 'apcpn' && view !== 'asnow') {
         drawPressure(ctx, g, proj);
       }
@@ -743,9 +814,40 @@
     }
     ctx.restore();
   }
-  function drawPressure(ctx, g, proj) {
+  function noData(ctx, W, H, msg) {
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(W / 2 - 140, 8, 280, 28);
+    ctx.fillStyle = '#5d6b79'; ctx.font = '13px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(msg, W / 2, 22); ctx.textBaseline = 'alphabetic';
+  }
+  // standard wind barbs (speeds in knots): the staff points toward where the wind comes from
+  function drawBarbs(ctx, g, proj, W, H) {
+    var S = W > 520 ? 38 : 29, L = W > 520 ? 24 : 19, nxu = g.nxu, nyu = g.nyu;
+    ctx.save(); ctx.strokeStyle = '#161d26'; ctx.fillStyle = '#161d26'; ctx.lineWidth = 1.05; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (var py = S / 2; py < H - 4; py += S) {
+      for (var px = S / 2; px < W - 4; px += S) {
+        var lon = DOM.lon0 + px / W * (DOM.lon1 - DOM.lon0), lat = DOM.lat1 - py / H * (DOM.lat1 - DOM.lat0);
+        var fx = clamp((lon - DOM.lon0) / g.deg, 0, nxu - 1.0001), fy = clamp((lat - DOM.lat0) / g.deg, 0, nyu - 1.0001), x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0, i = y0 * nxu + x0;
+        var u = (g.u[i] * (1 - tx) + g.u[i + 1] * tx) * (1 - ty) + (g.u[i + nxu] * (1 - tx) + g.u[i + nxu + 1] * tx) * ty;
+        var v = (g.v[i] * (1 - tx) + g.v[i + 1] * tx) * (1 - ty) + (g.v[i + nxu] * (1 - tx) + g.v[i + nxu + 1] * tx) * ty;
+        var sp = Math.hypot(u, v), r5 = Math.round(sp / 5) * 5;
+        if (r5 < 5) { ctx.beginPath(); ctx.arc(px, py, 2.2, 0, 6.3); ctx.stroke(); continue; }
+        var sx = -u / sp, sy = v / sp; // screen vector from the station toward the wind source (y is down)
+        var qx = -sy, qy = sx;         // perpendicular, clockwise side
+        var ex = px + sx * L, ey = py + sy * L;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.stroke();
+        var pos = 0, rem = r5, bl = 8.5;
+        var at = function (t) { return [ex - sx * t, ey - sy * t]; };
+        while (rem >= 50) { var a = at(pos), b = at(pos + 4.2); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(a[0] + qx * bl + sx * 1.5, a[1] + qy * bl + sy * 1.5); ctx.lineTo(b[0], b[1]); ctx.closePath(); ctx.fill(); pos += 5.5; rem -= 50; }
+        while (rem >= 10) { var c = at(pos); ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.lineTo(c[0] + qx * bl + sx * 3, c[1] + qy * bl + sy * 3); ctx.stroke(); pos += 3.4; rem -= 10; }
+        if (rem >= 5) { if (pos === 0) pos = 3.4; var e = at(pos); ctx.beginPath(); ctx.moveTo(e[0], e[1]); ctx.lineTo(e[0] + qx * bl * 0.5 + sx * 1.6, e[1] + qy * bl * 0.5 + sy * 1.6); ctx.stroke(); }
+      }
+    }
+    ctx.restore();
+  }
+  function drawPressure(ctx, g, proj, opt) {
+    opt = opt || {};
     var mn = Infinity, mx = -Infinity, i;
-    drawThickness(ctx, g, proj);
+    if (opt.thick !== false) drawThickness(ctx, g, proj);
     for (i = 0; i < g.mslp.length; i++) { var v = g.mslp[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
     var labels = [];
     ctx.lineJoin = 'round';
@@ -756,7 +858,7 @@
         pathChain(ctx, ch, g, proj);
         ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 2.2; ctx.stroke();
         ctx.strokeStyle = 'rgba(0,0,0,.95)'; ctx.lineWidth = 0.9; ctx.stroke();
-        if (lev % 8 === 0) {
+        if (lev % 8 === 0 && opt.labels !== false) {
           var len = 0, pts = ch.map(function (q) { return proj(DOM.lon0 + q[0] * g.deg, DOM.lat0 + q[1] * g.deg); });
           for (var s = 1; s < pts.length; s++) len += Math.hypot(pts[s][0] - pts[s - 1][0], pts[s][1] - pts[s - 1][1]);
           if (len > 150) {
@@ -770,7 +872,7 @@
     }
     ctx.font = '600 10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#111820';
     labels.forEach(function (L) { ctx.save(); ctx.translate(L.x, L.y); ctx.rotate(L.ang); halo(ctx, L.text, 0, 0); ctx.restore(); });
-    findExtremes(g).forEach(function (e) {
+    if (opt.extremes !== false) findExtremes(g).forEach(function (e) {
       var p = proj(DOM.lon0 + e.i * g.deg, DOM.lat0 + e.j * g.deg);
       ctx.font = '800 22px -apple-system, system-ui, sans-serif'; ctx.fillStyle = e.type === 'L' ? '#d42a2a' : '#1f5fd6';
       halo(ctx, e.type, p[0], p[1]);
@@ -821,6 +923,14 @@
       ctx.fillStyle = txt; for (var t = lo; t <= hi - 10; t += 20) ctx.fillText(t + '°', clamp(4 + (t - lo) / (hi - lo) * bw, 12, W - 12), 27);
       return;
     }
+    if (view === 'dew') {
+      var dlo = -40, dhi = 80, dbw = W - 8;
+      for (i = 0; i < dbw; i++) { var dc = DLUT[dIdx(dlo + (i / dbw) * (dhi - dlo))]; ctx.fillStyle = 'rgb(' + dc.map(Math.round).join(',') + ')'; ctx.fillRect(4 + i, 2, 1.5, 12); }
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 0.6; ctx.strokeRect(4, 2, dbw, 12);
+      ctx.fillStyle = txt; for (var dt = dlo; dt <= dhi; dt += 20) ctx.fillText(dt + '°', clamp(4 + (dt - dlo) / (dhi - dlo) * dbw, 12, W - 12), 27);
+      return;
+    }
+    if (view === 'wind') { bins(4, W - 8, 2, WIND_T, WIND_C, [4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 46, 52, 60, 70, 80], function (kt) { return String(Math.round(kt * KT2MPH)); }); return; }
     if (view === 'apcpn') { bins(4, W - 8, 2, ACC_T, ACC_C, [0.01, 0.1, 0.3, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 14, 20, 24]); return; }
     if (view === 'asnow') { bins(4, W - 8, 2, SNOW_T, SNOW_C, [0.1, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48]); return; }
     if (!frzn) { bins(4, W - 8, 2, RATE_T, RATE_C, null, inHr); return; }
@@ -1219,7 +1329,7 @@
   // ---------------------------------------------------------------- demo data
   function makeDemoGrid(spec, M) {
     var nt = 8 * 24, npts = spec.nx * spec.ny, t0 = Math.floor(Date.now() / 86400000) * 86400, hasT = !!M.type;
-    var d = { detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), th: new Float32Array(npts * nt), pt: hasT ? new Int8Array(npts * nt) : null, hasType: hasT, model: 'demo', hLast: M.id === 'rrfs' ? 96 : nt - 1 };
+    var d = { detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), th: new Float32Array(npts * nt), dw: new Float32Array(npts * nt), ws: new Float32Array(npts * nt), wd: new Float32Array(npts * nt), pt: hasT ? new Int8Array(npts * nt) : null, hasType: hasT, model: 'demo', hLast: M.id === 'rrfs' ? 96 : nt - 1 };
     var shift = { ecmwf: 0, gfs: 0.25, aifs: -0.2, aigfs: 0.4, rrfs: 0.1 }[M.id] || 0;
     var elapsed = (Date.now() / 1000 - t0) / 3600;
     for (var h = 0; h < nt; h++) {
@@ -1236,6 +1346,10 @@
         var diur = 3 * Math.sin(((t0 + h * 3600) / 3600 % 24 - 9) / 24 * 6.283);
         var T = 41 - 2.6 * (lat - 42) + (lon + 71) * 0.4 + diur - 5 * Math.exp(-r2 / 18);
         d.t[idx] = T;
+        d.dw[idx] = M.id === 'aigfs' ? NaN : T - 12 - 8 * Math.exp(-r2 / 30) + 14 * band;
+        var gx = -dy, gy = dx, gr = Math.sqrt(r2) + 0.6, wv = 10 + 34 * Math.exp(-r2 / (2 * 3 * 3)) * (gr / (gr + 1.2));
+        var uw = 8 + wv * (gx / gr) * 0.9 - wv * (dx / gr) * 0.25, vw = 2 + wv * (gy / gr) * 0.9 - wv * (dy / gr) * 0.25;
+        d.ws[idx] = Math.hypot(uw, vw); d.wd[idx] = (Math.atan2(-uw, -vw) * 180 / Math.PI + 360) % 360;
         d.th[idx] = 540 + (T - 33) * 0.9 + 0.4 * (d.p[idx] - 1010);
         if (hasT) d.pt[idx] = rate > 0 ? (T <= 30 ? 5 : T <= 33 ? (lon < -72 ? 3 : 7) : T <= 36 ? 7 : 1) : 0;
         // demo snowfall (10:1 inches): all-snow when cold, half when near freezing
