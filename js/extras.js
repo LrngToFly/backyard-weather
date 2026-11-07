@@ -115,7 +115,10 @@ function renderAQ() {
 // Open-Meteo keeps every model's past forecasts. For each recent day we take the high, low and rain each model predicted
 // 1, 3 and 5 days ahead and compare them with what your station recorded.
 // Rain is scored as "rain day or dry day called right" (0.05 in or more counts as a rain day) plus the 30-day totals.
-var SCORE_LEADS = [1, 3, 5], SCORE_DAYS = 30, RAIN_DAY = 0.05;
+// The station's rain gauge isn't heated: snow sits in the cup and shows up as "rain" when it melts, maybe days later.
+// So snow days (Euro or GFS forecast at least 0.2 in of snow, or the gauge reported rain on a day that stayed at or
+// below 33°F) and the days after them, up to the first day that reaches 36°F, are left out of the rain score.
+var SCORE_LEADS = [1, 3, 5], SCORE_DAYS = 30, RAIN_DAY = 0.05, SNOW_DAY = 0.2, MELT_F = 36;
 var scoreMode = store.get('wx.scoremode', 'both'), scoreRes = null, scoreBusy = false;
 async function loadScore(force) {
   if (demo) { scoreRes = makeDemoScore(); renderScore(); return; }
@@ -124,14 +127,14 @@ async function loadScore(force) {
   try {
     await loadObsStore();
     var today = ymd(dayStart(0)), fc = await idb.get('score-fc');
-    if (force || !fc || fc.day !== today || fc.station !== settings.stationId || !fc.p) {
-      var L = homeLoc(), vars = SCORE_LEADS.map(function (n) { return 'temperature_2m_previous_day' + n + ',precipitation_previous_day' + n; }).join(',');
+    if (force || !fc || fc.day !== today || fc.station !== settings.stationId || !fc.p || !fc.s) {
+      var L = homeLoc(), vars = SCORE_LEADS.map(function (n) { return 'temperature_2m_previous_day' + n + ',precipitation_previous_day' + n; }).join(',') + ',snowfall_previous_day1';
       var oms = PT_MODELS.map(function (m) { return m.om; });
       var j = await omFetch(OM_PREV + '?latitude=' + L.lat.toFixed(3) + '&longitude=' + L.lon.toFixed(3) + '&hourly=' + vars + '&models=' + oms.join(',') +
         '&past_days=62&forecast_days=0&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&timezone=GMT');
-      fc = { day: today, station: settings.stationId, times: j.hourly.time, v: {}, p: {} };
+      fc = { day: today, station: settings.stationId, times: j.hourly.time, v: {}, p: {}, s: {} };
       PT_MODELS.forEach(function (m) {
-        fc.v[m.id] = {}; fc.p[m.id] = {};
+        fc.v[m.id] = {}; fc.p[m.id] = {}; fc.s[m.id] = j.hourly['snowfall_previous_day1_' + m.om] || [];
         SCORE_LEADS.forEach(function (n) {
           fc.v[m.id][n] = j.hourly['temperature_2m_previous_day' + n + '_' + m.om] || [];
           fc.p[m.id][n] = j.hourly['precipitation_previous_day' + n + '_' + m.om] || [];
@@ -158,8 +161,10 @@ function computeScore(fc) {
     days.push(ds);
   });
   var res = { n: days.length, first: days[0], last: days[days.length - 1], models: [] };
-  // rain: the same days, where the station also reported a rain total
-  var rdays = days.filter(function (ds) { return obsDays[ds].rain != null; });
+  // rain: the same days, where the station also reported a rain total, leaving out snow and melt days
+  var snowy = snowAndMeltDays(fc, byDay);
+  var rdays = days.filter(function (ds) { return obsDays[ds].rain != null && !snowy[ds]; });
+  res.snowLeftOut = days.filter(function (ds) { return snowy[ds]; }).length;
   res.rainN = rdays.length;
   res.obsRain = rdays.reduce(function (s, ds) { return s + obsDays[ds].rain; }, 0);
   res.wetDays = rdays.filter(function (ds) { return obsDays[ds].rain >= RAIN_DAY; }).length;
@@ -189,6 +194,25 @@ function computeScore(fc) {
     res.models.push(row);
   });
   return res;
+}
+// days whose gauge reading can't be trusted: snow days and the melt days after them
+function snowAndMeltDays(fc, byDay) {
+  var out = {}, all = Object.keys(byDay).sort(), melt = 0;
+  all.forEach(function (ds) {
+    var o = obsDays && obsDays[ds], snow = 0;
+    ['ecmwf', 'gfs'].forEach(function (id) {
+      var a = fc.s && fc.s[id]; if (!a || !a.length) return;
+      var sum = 0; byDay[ds].forEach(function (i) { if (a[i] != null) sum += a[i]; });
+      snow = Math.max(snow, sum);
+    });
+    var frozenGauge = o && !o.none && o.hi != null && o.hi <= 33 && o.rain >= RAIN_DAY;
+    if (snow >= SNOW_DAY || frozenGauge) { out[ds] = 'snow'; melt = 5; return; }
+    if (melt > 0) {
+      out[ds] = 'melt'; melt--;
+      if (o && o.hi != null && o.hi >= MELT_F) melt = 0; // the cup has thawed by the end of this day
+    }
+  });
+  return out;
 }
 function renderScore() {
   var box = el('score-body'); if (!box) return;
@@ -261,7 +285,9 @@ function drawScore() {
   for (var i = 1; i <= SCORE_DAYS; i++) if (!demo && obsDays && !obsDays[ymd(dayStart(i))]) missing++;
   var span = n0 + ' days (' + f.toLocaleDateString([], o) + ' – ' + t.toLocaleDateString([], o) + ')';
   box.appendChild(mkEl('p', 'small muted', (rain
-    ? 'Share of days each model called right as a rain day (0.05 in or more) or a dry day, at your station over ' + span + '. Higher is better; the best in each column is highlighted. Rain is patchy, so a storm that misses your gauge by a few miles counts against a model.'
+    ? 'Share of days each model called right as a rain day (0.05 in or more) or a dry day, at your station over ' + span + '. Higher is better; the best in each column is highlighted. Rain is patchy, so a storm that misses your gauge by a few miles counts against a model.' +
+      ' Your rain gauge isn\'t heated: snow sits in the cup and is counted as rain only when it melts, sometimes days later. So snow days and the days after them, until it warms above freezing, are left out' +
+      (R.snowLeftOut ? ' (' + R.snowLeftOut + ' day' + (R.snowLeftOut === 1 ? '' : 's') + ' this period).' : ' (none this period).')
     : 'Average miss, in °F, of the daily ' + (scoreMode === 'both' ? 'high and low' : scoreMode === 'hi' ? 'high' : 'low') + ' at your station over ' + span + '. Lower is better; the best in each column is highlighted.') +
     (missing ? ' ' + missing + ' more recent day' + (missing === 1 ? ' is' : 's are') + ' still loading.' : '')));
 }
