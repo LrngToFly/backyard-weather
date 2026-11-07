@@ -12,7 +12,7 @@
   var OM = 'https://api.open-meteo.com/v1/ecmwf';
   var OM_BASE = 'https://api.open-meteo.com/v1/';
   var TT_BASE = 'https://www.tropicaltidbits.com/analysis/models/?region=neus';
-  var CACHE_VER = 4; // bump when the saved-map format changes
+  var CACHE_VER = 5; // bump when the saved-map format changes
   var GRID_TTL = 2 * 3600 * 1000; // reuse saved model data for 2 hours
   var CITIES = [
     ['Boston', 42.36, -71.06], ['Hartford', 41.76, -72.67], ['Providence', 41.82, -71.41],
@@ -20,8 +20,8 @@
     ['Concord', 43.21, -71.54], ['New York', 40.71, -74.0], ['Hyannis', 41.65, -70.28], ['Utica', 43.10, -75.23]
   ];
   var VIEWS = [
-    { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (in/hr)' },
-    { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (in/hr) colored by type' },
+    { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (in/hr). Dashed lines: 1000–500 mb thickness (blue = 540 dam)' },
+    { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (in/hr) colored by type. Dashed lines: 1000–500 mb thickness (blue = 540 dam)' },
     { id: 'apcpn', label: 'Total Precip', tt: 'apcpn', sub: 'Precipitation accumulated since the first time shown (inches)' },
     { id: 'asnow', label: 'Total Snow', tt: 'asnow', sub: 'Snowfall accumulated since the first time shown (inches, 10:1 snow-to-water ratio)' },
     { id: 't2m', label: '2m Temp', tt: 'T2m', sub: '2-metre air temperature (°F); dark blue line = 32°F' }
@@ -248,7 +248,7 @@
     for (j = 0; j < spec.ny; j++) for (i = 0; i < spec.nx; i++) pts.push([spec.lats[j], spec.lons[i]]);
     var CH = 100, chunks = [];
     for (var k = 0; k < pts.length; k += CH) chunks.push(pts.slice(k, k + CH));
-    var vars = 'pressure_msl,precipitation,temperature_2m,snowfall' + (useType ? ',precipitation_type' : '');
+    var vars = 'pressure_msl,precipitation,temperature_2m,snowfall,geopotential_height_500hPa,geopotential_height_1000hPa' + (useType ? ',precipitation_type' : '');
     var results = new Array(chunks.length), next = 0;
     async function worker() {
       while (next < chunks.length) {
@@ -272,20 +272,22 @@
     var first = pick(results[0][0].hourly, 'time'), nt = first.length, npts = pts.length;
     var d = {
       detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: Float64Array.from(first), fetchedAt: Date.now(),
-      p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt),
+      p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), th: new Float32Array(npts * nt),
       pt: useType ? new Int8Array(npts * nt) : null, hasType: !!useType, model: M.om, hLast: 0
     };
     var base = 0;
     results.forEach(function (arr, c) {
       arr.forEach(function (loc, q) {
         var h = loc.hourly, idx = (c * CH + q) * nt;
-        var P = pick(h, 'pressure_msl'), R = pick(h, 'precipitation'), T = pick(h, 'temperature_2m'), S = pick(h, 'snowfall'), Y = useType ? pick(h, 'precipitation_type') : null;
+        var P = pick(h, 'pressure_msl'), R = pick(h, 'precipitation'), T = pick(h, 'temperature_2m'), S = pick(h, 'snowfall'), Z5 = pick(h, 'geopotential_height_500hPa'), Z1 = pick(h, 'geopotential_height_1000hPa'), Y = useType ? pick(h, 'precipitation_type') : null;
         for (var x = 0; x < nt; x++) {
           d.p[idx + x] = P && P[x] !== null ? P[x] : NaN;
           d.pr[idx + x] = R && R[x] !== null ? R[x] : NaN;
           d.t[idx + x] = T && T[x] !== null ? T[x] : NaN;
           // Open-Meteo snowfall is 0.7 cm (0.7 x water depth); x 10/7 gives a 10:1 snow depth like Tropical Tidbits
           d.sn[idx + x] = S && S[x] !== null ? S[x] * 10 / 7 : NaN;
+          // 1000-500 mb thickness in decameters (dam), the rain/snow guide Tropical Tidbits draws as dashed lines
+          d.th[idx + x] = Z5 && Z1 && Z5[x] !== null && Z1[x] !== null ? (Z5[x] - Z1[x]) / 10 : NaN;
           if (P && P[x] !== null && x > d.hLast) d.hLast = x;
           if (useType) d.pt[idx + x] = Y && Y[x] !== null ? Y[x] : -1;
         }
@@ -513,11 +515,11 @@
     if (stepCache.has(si)) return stepCache.get(si);
     var st = d.steps[si], h = st.h, s0 = d.steps[0].h, nt = d.nt, spec = d.spec, npts = spec.nx * spec.ny;
     var prevH = si > 0 ? d.steps[si - 1].h : h - 3, dt = Math.max(1, h - prevH);
-    var mslp = new Float32Array(npts), t2 = new Float32Array(npts), rate = new Float32Array(npts), acc = new Float32Array(npts), snacc = new Float32Array(npts);
+    var mslp = new Float32Array(npts), th = new Float32Array(npts), t2 = new Float32Array(npts), rate = new Float32Array(npts), acc = new Float32Array(npts), snacc = new Float32Array(npts);
     var fs = new Float32Array(npts), fm = new Float32Array(npts), ff = new Float32Array(npts);
     for (var p = 0; p < npts; p++) {
       var base = p * nt;
-      mslp[p] = d.p[base + h]; t2[p] = d.t[base + h];
+      mslp[p] = d.p[base + h]; t2[p] = d.t[base + h]; th[p] = d.th ? d.th[base + h] : NaN;
       var sum = 0, cnt = 0, k, v;
       for (k = Math.max(0, h - dt + 1); k <= h; k++) { v = d.pr[base + k]; if (v === v) { sum += v; cnt++; } }
       rate[p] = cnt ? sum / cnt : 0;
@@ -543,10 +545,12 @@
       }
     }
     fillNaN(mslp, 1013); fillNaN(t2, 40);
+    var hasTh = false; for (var q0 = 0; q0 < npts; q0++) if (th[q0] === th[q0]) { hasTh = true; break; }
+    if (hasTh) fillNaN(th, 552);
     var K2 = spec.step <= 0.25 ? 2 : 4;
     var g = {
       K: K2, nxu: (spec.nx - 1) * K2 + 1, nyu: (spec.ny - 1) * K2 + 1, spec: spec, deg: spec.step / K2,
-      mslp: upCubic(mslp, spec.nx, spec.ny, K2), t2: upCubic(t2, spec.nx, spec.ny, K2),
+      mslp: upCubic(mslp, spec.nx, spec.ny, K2), th: hasTh ? upCubic(th, spec.nx, spec.ny, K2) : null, t2: upCubic(t2, spec.nx, spec.ny, K2),
       rate: upBilinear(rate, spec.nx, spec.ny, K2), acc: upBilinear(acc, spec.nx, spec.ny, K2), snacc: upBilinear(snacc, spec.nx, spec.ny, K2),
       fs: upBilinear(fs, spec.nx, spec.ny, K2), fm: upBilinear(fm, spec.nx, spec.ny, K2), ff: upBilinear(ff, spec.nx, spec.ny, K2)
     };
@@ -725,8 +729,23 @@
       if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
     });
   }
+  function drawThickness(ctx, g, proj) {
+    if (!g.th) return;
+    var mn = Infinity, mx = -Infinity, i, labels = [];
+    for (i = 0; i < g.th.length; i++) { var v = g.th[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+    ctx.save(); ctx.lineJoin = 'round'; ctx.setLineDash([6, 4]);
+    for (var lev = Math.ceil(mn / 6) * 6; lev <= mx; lev += 6) {
+      var col = lev === 540 ? '#1f5fd6' : lev < 540 ? '#2f6fd0' : '#d42a2a';
+      contourChains(g.th, g.nxu, g.nyu, lev).forEach(function (ch) {
+        if (ch.length < 3) return;
+        pathChain(ctx, ch, g, proj); ctx.strokeStyle = col; ctx.lineWidth = lev === 540 ? 1.3 : 0.9; ctx.stroke();
+      });
+    }
+    ctx.restore();
+  }
   function drawPressure(ctx, g, proj) {
     var mn = Infinity, mx = -Infinity, i;
+    drawThickness(ctx, g, proj);
     for (i = 0; i < g.mslp.length; i++) { var v = g.mslp[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
     var labels = [];
     ctx.lineJoin = 'round';
@@ -1200,7 +1219,7 @@
   // ---------------------------------------------------------------- demo data
   function makeDemoGrid(spec, M) {
     var nt = 8 * 24, npts = spec.nx * spec.ny, t0 = Math.floor(Date.now() / 86400000) * 86400, hasT = !!M.type;
-    var d = { detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), pt: hasT ? new Int8Array(npts * nt) : null, hasType: hasT, model: 'demo', hLast: M.id === 'rrfs' ? 96 : nt - 1 };
+    var d = { detail: effDetail(M), dom: DOM_KEY, ver: CACHE_VER, modelId: M.id, spec: spec, nt: nt, times: new Float64Array(nt), fetchedAt: Date.now(), p: new Float32Array(npts * nt), pr: new Float32Array(npts * nt), t: new Float32Array(npts * nt), sn: new Float32Array(npts * nt), th: new Float32Array(npts * nt), pt: hasT ? new Int8Array(npts * nt) : null, hasType: hasT, model: 'demo', hLast: M.id === 'rrfs' ? 96 : nt - 1 };
     var shift = { ecmwf: 0, gfs: 0.25, aifs: -0.2, aigfs: 0.4, rrfs: 0.1 }[M.id] || 0;
     var elapsed = (Date.now() / 1000 - t0) / 3600;
     for (var h = 0; h < nt; h++) {
@@ -1217,6 +1236,7 @@
         var diur = 3 * Math.sin(((t0 + h * 3600) / 3600 % 24 - 9) / 24 * 6.283);
         var T = 41 - 2.6 * (lat - 42) + (lon + 71) * 0.4 + diur - 5 * Math.exp(-r2 / 18);
         d.t[idx] = T;
+        d.th[idx] = 540 + (T - 33) * 0.9 + 0.4 * (d.p[idx] - 1010);
         if (hasT) d.pt[idx] = rate > 0 ? (T <= 30 ? 5 : T <= 33 ? (lon < -72 ? 3 : 7) : T <= 36 ? 7 : 1) : 0;
         // demo snowfall (10:1 inches): all-snow when cold, half when near freezing
         d.sn[idx] = rate > 0 ? rate * 10 * (T <= 31 ? 1 : T <= 34 ? 0.5 : 0) : 0;
