@@ -484,16 +484,16 @@ function renderHistory() {
   var msg = el('hist-msg'); msg.hidden = !histMsg || (hist && hist.rows.length > 0 && !/Could not|not loaded|still need/.test(histMsg)); msg.textContent = histMsg;
   var sum = el('hist-sum'), rows = hist ? hist.rows : [];
   if (!rows.length) { sum.textContent = ''; return; }
-  var daily = hist.kind === 'daily', hiT = -Infinity, loT = Infinity, hiAt = null, loAt = null, pk = 0, rain = 0;
+  var daily = hist.kind === 'daily', hiT = -Infinity, loT = Infinity, hiAt = null, loAt = null, pk = 0, pkAt = null, rain = 0;
   rows.forEach(function (r) {
     var h = daily ? r.hi : r.temp, l = daily ? r.lo : r.temp;
     if (h !== null && h !== undefined && h > hiT) { hiT = h; hiAt = r.t; }
     if (l !== null && l !== undefined && l < loT) { loT = l; loAt = r.t; }
-    if (r.gust !== null && r.gust !== undefined) pk = Math.max(pk, r.gust);
+    if (r.gust !== null && r.gust !== undefined && r.gust > pk) { pk = r.gust; pkAt = r.t; }
     if (r.acc !== null && r.acc !== undefined) rain = Math.max(rain, r.acc);
   });
   function on(t) { return hist.kind === '5min' || t === null ? '' : ' (' + new Date(t * 1000).toLocaleDateString([], hist.kind === 'hourly' ? { weekday: 'short' } : { month: 'short', day: 'numeric' }) + ')'; }
-  sum.textContent = 'High ' + fmt(hiT, 1) + '°' + on(hiAt) + ' · Low ' + fmt(loT, 1) + '°' + on(loAt) + ' · Peak gust ' + fmt(pk, 1) + ' mph · Rain ' + fmt(rain, 2) + ' in';
+  sum.textContent = 'High ' + fmt(hiT, 1) + '°' + on(hiAt) + ' · Low ' + fmt(loT, 1) + '°' + on(loAt) + ' · Peak gust ' + fmt(pk, 1) + ' mph' + on(pkAt) + ' · Rain ' + fmt(rain, 2) + ' in';
 }
 function initHistoryCharts() {
   buildRangeSeg();
