@@ -18,7 +18,7 @@ async function loadStation() {
     if (!o) throw new Error('No observation in the response');
     var im = o.imperial || {};
     station = {
-      temp: im.temp, heatIndex: im.heatIndex, windChill: im.windChill, dew: im.dewpt, wind: im.windSpeed, gust: im.windGust,
+      temp: im.temp, heatIndex: im.heatIndex, windChill: im.windChill, dew: im.dewpt, wind: windOk(im.windSpeed), gust: windOk(im.windGust),
       pressure: im.pressure, rate: im.precipRate, rainToday: im.precipTotal, hum: o.humidity, dir: o.winddir, uv: o.uv,
       lat: o.lat, lon: o.lon, solar: o.solarRadiation, epoch: o.epoch ? o.epoch * 1000 : (o.obsTimeUtc ? Date.parse(o.obsTimeUtc) : Date.now()), fetchedAt: Date.now()
     };
@@ -91,8 +91,8 @@ function saveObs() {
 }
 // v: 2 = also has dew point, wind, gust and pressure (for the month and year charts)
 function obsFromImperial(im) {
-  return { v: 2, hi: num(im.tempHigh), lo: num(im.tempLow), rain: num(im.precipTotal), dew: num(im.dewptAvg, im.dewpt), wmax: num(im.windspeedHigh),
-    gust: num(im.windgustHigh), pmax: num(im.pressureMax), pmin: num(im.pressureMin) };
+  return { v: 2, hi: num(im.tempHigh), lo: num(im.tempLow), rain: num(im.precipTotal), dew: num(im.dewptAvg, im.dewpt), wmax: windOk(num(im.windspeedHigh)),
+    gust: windOk(num(im.windgustHigh)), pmax: num(im.pressureMax), pmin: num(im.pressureMin) };
 }
 function needsObs(o) { return !o || (!o.none && o.v !== 2); }
 // last 7 days in one request (at most every 3 hours)
@@ -185,8 +185,8 @@ function renderRainTotals() {
 var hist = null, histOffset = 0, histFetchedAt = 0, histCache = {}, histMsg = 'Loading…', hoverT = null;
 var histRange = store.get('wx.histrange', 'day');
 if (['day', 'week', 'month', 'ytd'].indexOf(histRange) < 0) histRange = 'day';
-var weekOffset = 0, monthOffset = 0, weekCache = {};   // 0 = this week / this month; 1 = the one before, and so on
-var WEEK_BACK = 156, MONTH_BACK = 36, weekLoads = {};                    // how far back the arrows go (3 years)
+var weekOffset = 0, monthOffset = 0, yearOffset = 0, weekCache = {};   // 0 = this week / month / year; 1 = the one before, and so on
+var WEEK_BACK = 156, MONTH_BACK = 36, YEAR_BACK = 3, weekLoads = {};                    // how far back the arrows go (3 years)
 function histKey(ds) { return 'hist-' + settings.stationId + '-' + ds; }
 var histPruned = false;
 async function pruneHist() {
@@ -202,7 +202,7 @@ function parseObsRows(obs) {
     if (!t) return;
     rows.push({
       t: t, temp: num(im.tempAvg, im.temp, im.tempHigh), dew: num(im.dewptAvg, im.dewpt, im.dewptHigh),
-      wind: num(im.windspeedAvg, im.windSpeed, im.windspeedHigh), gust: num(im.windgustHigh, im.windgustAvg, im.windGust),
+      wind: windOk(num(im.windspeedAvg, im.windSpeed, im.windspeedHigh)), gust: windOk(num(im.windgustHigh, im.windgustAvg, im.windGust)),
       rate: num(im.precipRate), acc: num(im.precipTotal),
       pres: (im.pressureMax != null && im.pressureMin != null && !isNaN(im.pressureMax) && !isNaN(im.pressureMin)) ? (+im.pressureMax + +im.pressureMin) / 2 : num(im.pressureMax, im.pressureMin, im.pressure)
     });
@@ -216,21 +216,23 @@ function rangeBounds() {
   var from, to;
   if (histRange === 'week') { from = weekStart(weekOffset); to = weekOffset === 0 ? dayStart(-1) : new Date(from.getFullYear(), from.getMonth(), from.getDate() + 7); }
   else if (histRange === 'month') { var n = new Date(); from = new Date(n.getFullYear(), n.getMonth() - monthOffset, 1); to = monthOffset === 0 ? dayStart(-1) : new Date(from.getFullYear(), from.getMonth() + 1, 1); }
-  else { from = new Date(new Date().getFullYear(), 0, 1); to = dayStart(-1); }
+  else { var y = new Date().getFullYear() - yearOffset; from = new Date(y, 0, 1); to = yearOffset === 0 ? dayStart(-1) : new Date(y + 1, 0, 1); }
   return { from: from, to: to, last: new Date(to.getFullYear(), to.getMonth(), to.getDate() - 1) };
 }
 // "Oct 25 – Oct 31, 2026", or "Dec 28, 2025 – Jan 3, 2026" across a new year
+// readings saved before the 60 mph limit existed
+function cleanWind(rows) { (rows || []).forEach(function (r) { r.wind = windOk(r.wind); r.gust = windOk(r.gust); }); }
 function rangeLabel() {
-  if (histRange === 'ytd') return new Date().getFullYear() + ' to date';
   var b = rangeBounds(), o = { month: 'short', day: 'numeric' }, y = b.from.getFullYear() !== b.last.getFullYear();
   return b.from.toLocaleDateString([], y ? { month: 'short', day: 'numeric', year: 'numeric' } : o) + ' – ' + b.last.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 function updateNav() {
-  var off = histRange === 'week' ? weekOffset : histRange === 'month' ? monthOffset : histOffset, max = histRange === 'week' ? WEEK_BACK : histRange === 'month' ? MONTH_BACK : HIST_KEEP_DAYS;
-  el('day-prev').hidden = el('day-next').hidden = histRange === 'ytd';
+  var off = histRange === 'week' ? weekOffset : histRange === 'month' ? monthOffset : histRange === 'ytd' ? yearOffset : histOffset;
+  var max = histRange === 'week' ? WEEK_BACK : histRange === 'month' ? MONTH_BACK : histRange === 'ytd' ? YEAR_BACK : HIST_KEEP_DAYS;
+  var unit = histRange === 'week' ? 'week' : histRange === 'month' ? 'month' : histRange === 'ytd' ? 'year' : 'day';
+  el('day-prev').hidden = el('day-next').hidden = false;
   el('day-prev').disabled = off >= max; el('day-next').disabled = off === 0;
-  el('day-prev').setAttribute('aria-label', 'Previous ' + (histRange === 'week' ? 'week' : histRange === 'month' ? 'month' : 'day'));
-  el('day-next').setAttribute('aria-label', 'Next ' + (histRange === 'week' ? 'week' : histRange === 'month' ? 'month' : 'day'));
+  el('day-prev').setAttribute('aria-label', 'Previous ' + unit); el('day-next').setAttribute('aria-label', 'Next ' + unit);
 }
 async function loadHistory(force) {
   el('hist-chip').textContent = histRange === 'day' ? '5-min' : histRange === 'week' ? 'hourly' : 'daily';
@@ -255,7 +257,7 @@ async function loadDay(force, quiet, off) {
   if (demo) { var dh = makeDemoHistory(day, t0, t1); dh.kind = '5min'; histCache[ds] = dh; histFetchedAt = Date.now(); show(dh); renderHiLo(); return; }
   if (!settings.apiKey) { if (!quiet) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); } return; }
   var c = histCache[ds];
-  if (!c && off > 0) { c = await idb.get(histKey(ds)); if (c) { c.kind = '5min'; histCache[ds] = c; } }
+  if (!c && off > 0) { c = await idb.get(histKey(ds)); if (c) { c.kind = '5min'; cleanWind(c.rows); histCache[ds] = c; } }
   if (away()) return;
   if (c && !force && (off > 0 || Date.now() - c.fetchedAt < 240000)) { if (off === 0) histFetchedAt = c.fetchedAt; show(c); return; }
   try {
@@ -287,7 +289,7 @@ async function loadWeek(force) {
   if (demo) { hist = makeDemoWeek(t0, t1); renderHistory(); return; }
   if (!settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
   var c = weekCache[key];
-  if (!c && !cur) { c = await idb.get('week-' + settings.stationId + '-' + key); if (c) weekCache[key] = c; }
+  if (!c && !cur) { c = await idb.get('week-' + settings.stationId + '-' + key); if (c) { cleanWind(c.rows); weekCache[key] = c; } }
   if (stale()) return;
   if (c && (!cur || Date.now() - c.fetchedAt < (force ? 60000 : 600000))) { hist = c; renderHistory(); return; }
   hist = null; histMsg = 'Loading…'; renderHistory();
@@ -324,7 +326,7 @@ async function loadWeek(force) {
 }
 function dayRow(ds, o) {
   var d = dsDate(ds);
-  return { t: d.getTime() / 1000 + 43200, ds: ds, hi: o.hi, lo: o.lo, dew: o.dew != null ? o.dew : null, wmax: o.wmax != null ? o.wmax : null, gust: o.gust != null ? o.gust : null,
+  return { t: d.getTime() / 1000 + 43200, ds: ds, hi: o.hi, lo: o.lo, dew: o.dew != null ? o.dew : null, wmax: windOk(o.wmax), gust: windOk(o.gust),
     rain: o.rain, pmax: o.pmax != null ? o.pmax : null, pmin: o.pmin != null ? o.pmin : null };
 }
 function summarizeRows(rows) {
@@ -346,8 +348,8 @@ async function loadDaily() {
   histMsg = '';
   if (!demo && !settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
   await loadObsStore();
-  var b = rangeBounds(), want = histRange + monthOffset, today = ymd(dayStart(0));
-  function stale() { return (histRange + monthOffset) !== want; }
+  var b = rangeBounds(), want = histRange + monthOffset + '/' + yearOffset, today = ymd(dayStart(0));
+  function stale() { return (histRange + monthOffset + '/' + yearOffset) !== want; }
   if (stale()) return;
   if (!demo) {
     var from = ymd(b.from), lastPast = ymd(b.last) < today ? ymd(b.last) : ymd(dayStart(1)), gaps = false;
@@ -381,7 +383,7 @@ function queueObsRange(from, to, maxReq) {
 function refreshDailyCharts() { if (histRange === 'month' || histRange === 'ytd') loadDaily(); }
 function buildRangeSeg() {
   var box = el('hist-range'); box.innerHTML = '';
-  [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['ytd', 'YTD']].forEach(function (o) {
+  [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['ytd', 'Year']].forEach(function (o) {
     var b = mkEl('button', 'tab' + (histRange === o[0] ? ' on' : ''), o[1]); b.type = 'button';
     b.addEventListener('click', function () {
       if (histRange === o[0]) return;
@@ -568,7 +570,7 @@ function initHistoryCharts() {
 function setHistDay(delta) {
   if (histRange === 'week') weekOffset = clamp(weekOffset + delta, 0, WEEK_BACK);
   else if (histRange === 'month') monthOffset = clamp(monthOffset + delta, 0, MONTH_BACK);
-  else if (histRange === 'day') histOffset = clamp(histOffset + delta, 0, HIST_KEEP_DAYS);
-  else return;
+  else if (histRange === 'ytd') yearOffset = clamp(yearOffset + delta, 0, YEAR_BACK);
+  else histOffset = clamp(histOffset + delta, 0, HIST_KEEP_DAYS);
   hoverT = null; loadHistory(false);
 }

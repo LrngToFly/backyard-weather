@@ -24,6 +24,9 @@ var TT_BASE = 'https://www.tropicaltidbits.com/analysis/models/?region=neus';
 var CACHE_VER = 7;                // bump when the saved-map format changes
 var GRID_TTL = 2 * 3600 * 1000;   // only used when the "new run?" check can't be reached
 var HIST_KEEP_DAYS = 14;          // past days of 5-minute station history kept on the device
+// The station sits between the house and trees; wind or gust readings above this are sensor glitches and are ignored.
+var MAX_WIND_MPH = 60;
+function windOk(v) { return v === null || v === undefined || isNaN(v) || v > MAX_WIND_MPH ? null : +v; }
 
 var CITIES = [
   ['Boston', 42.36, -71.06], ['Hartford', 41.76, -72.67], ['Providence', 41.82, -71.41],
