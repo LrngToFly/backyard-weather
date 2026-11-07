@@ -2,13 +2,13 @@
 'use strict';
 
 // ---------------------------------------------------------------- screen layout (phone / iPad portrait / iPad landscape)
-// two columns on a landscape iPad: map, backyard forecast and scorecard on the left; station, daylight, charts and links on the right
+// two columns on a landscape iPad: map and backyard forecast on the left; station, radar, daylight, charts, links and scorecard on the right
 var placedBig = null;
 function placeCards(big) {
   if (placedBig === big) return; placedBig = big;
   var main = document.querySelector('main'), foot = document.querySelector('footer'), L = el('colL'), R = el('colR');
-  if (big) { ['maps', 'point', 'score'].forEach(function (id) { L.appendChild(el(id)); }); ['station', 'radar-card', 'daylight', 'today', 'tt'].forEach(function (id) { R.appendChild(el(id)); }); }
-  else ['station', 'radar-card', 'daylight', 'maps', 'point', 'score', 'today', 'tt'].forEach(function (id) { main.insertBefore(el(id), foot); });
+  if (big) { ['maps', 'point'].forEach(function (id) { L.appendChild(el(id)); }); ['station', 'radar-card', 'daylight', 'today', 'tt', 'score'].forEach(function (id) { R.appendChild(el(id)); }); }
+  else ['station', 'radar-card', 'daylight', 'maps', 'point', 'today', 'tt', 'score'].forEach(function (id) { main.insertBefore(el(id), foot); });
 }
 function applyLayout() {
   var w = document.documentElement.clientWidth, mode = settings.layout || 'auto', cl = document.documentElement.classList, med, big;
