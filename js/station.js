@@ -280,7 +280,44 @@ async function loadDay(force, quiet, off) {
   if (off === 0) renderHiLo();
 }
 // the last 7 days, hourly, in one request (kept for 10 minutes)
-// one calendar week of hourly readings: a single request (past weeks are saved on the device)
+// Weather Underground request that also says whether the key is being throttled (it answers 401 "API key is throttled")
+async function wuGet(path, extra) {
+  var r = await fetch(wuUrl(path, extra), { cache: 'no-store' }), txt = r.status === 204 ? '' : await r.text(), body = null;
+  try { body = txt ? JSON.parse(txt) : null; } catch (e) { /* not JSON */ }
+  return { status: r.status, ok: r.ok, body: body, throttled: r.status === 429 || /throttl/i.test(txt) };
+}
+function wuFail(r) {
+  if (r.throttled) return new Error('Weather Underground is temporarily limiting requests for your key; try again in a while');
+  if (r.status === 401 || r.status === 403) return new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
+  return new Error('Weather Underground HTTP ' + r.status);
+}
+// This week: the last-7-days hourly feed. Past weeks: the hourly history for the week (one request); if Weather Underground
+// is limiting that service, the week is built from the 5-minute history instead (one request per day, like the Day view).
+async function fetchWeekRows(b, key, cur, t0) {
+  function obs(r) { return parseObsRows(r.body && r.body.observations); }
+  if (cur) {
+    var r0 = await wuGet('observations/hourly/7day');
+    if (!r0.ok && r0.status !== 204) throw wuFail(r0);
+    return obs(r0).filter(function (x) { return x.t >= t0; });
+  }
+  var r = await wuGet('history/hourly', '&startDate=' + key + '&endDate=' + ymd(b.last));
+  if (r.ok || r.status === 204) return obs(r);
+  if (!r.throttled && r.status !== 401) throw wuFail(r);
+  log('Hourly history is limited right now; building the week of ' + key + ' from 5-minute readings');
+  var rows = [];
+  for (var d = new Date(b.from); d < b.to; d.setDate(d.getDate() + 1)) {
+    var ds = ymd(d), c = histCache[ds] || await idb.get(histKey(ds));
+    if (!c) {
+      var r2 = await wuGet('history/all', '&date=' + ds);
+      if (!r2.ok && r2.status !== 204) throw wuFail(r2);
+      c = { kind: '5min', rows: obs(r2) };
+      await sleep(1200);
+    }
+    rows = rows.concat(c.rows.map(function (x) { return Object.assign({}, x); }));
+  }
+  return rows;
+}
+// one calendar week of hourly readings (past weeks are saved on the device)
 async function loadWeek(force) {
   var b = rangeBounds(), key = ymd(b.from), off = weekOffset, cur = off === 0;
   var t0 = b.from.getTime() / 1000, t1 = cur ? Date.now() / 1000 : b.to.getTime() / 1000;
@@ -295,13 +332,9 @@ async function loadWeek(force) {
   hist = null; histMsg = 'Loading…'; renderHistory();
   try {
     // quick taps on the arrows can ask for the same week twice: share one download
-    var p = weekLoads[key] || (weekLoads[key] = fetch(wuUrl('history/hourly', '&startDate=' + key + '&endDate=' + ymd(b.last)), { cache: 'no-store' })
-      .then(async function (res) { return { status: res.status, ok: res.ok, body: res.status === 204 || !res.ok ? null : await res.json() }; })
+    var p = weekLoads[key] || (weekLoads[key] = fetchWeekRows(b, key, cur, t0)
       .finally(function () { setTimeout(function () { delete weekLoads[key]; }, 5000); }));
-    var r = await p;
-    if (r.status === 401 || r.status === 403) throw new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
-    if (!r.ok && r.status !== 204) throw new Error('Weather Underground HTTP ' + r.status);
-    var rows = r.body ? parseObsRows(r.body.observations) : [];
+    var rows = (await p).map(function (x) { return Object.assign({}, x); });
     if (weekCache[key] && weekCache[key].fetchedAt > Date.now() - 5000) { if (stale()) return; hist = weekCache[key]; renderHistory(); return; } // another tap already finished it
     // rain: Weather Underground's total restarts each midnight, so carry it on into a total for the week
     var carried = 0, dayTot = 0, lastDay = '';
@@ -314,7 +347,7 @@ async function loadWeek(force) {
     c = { kind: 'hourly', t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
     weekCache[key] = c;
     if (!cur && rows.length) idb.set('week-' + settings.stationId + '-' + key, c);
-    log('Station week of ' + key + ': ' + rows.length + ' hourly readings');
+    log('Station week of ' + key + ': ' + rows.length + ' readings');
     if (stale()) return;
     hist = c; histMsg = rows.length ? '' : 'No readings reported this week.';
   } catch (e) {
