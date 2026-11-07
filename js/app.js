@@ -7,8 +7,8 @@ var placedBig = null;
 function placeCards(big) {
   if (placedBig === big) return; placedBig = big;
   var main = document.querySelector('main'), foot = document.querySelector('footer'), L = el('colL'), R = el('colR');
-  if (big) { ['maps', 'point', 'score'].forEach(function (id) { L.appendChild(el(id)); }); ['station', 'daylight', 'today', 'tt'].forEach(function (id) { R.appendChild(el(id)); }); }
-  else ['station', 'daylight', 'maps', 'point', 'score', 'today', 'tt'].forEach(function (id) { main.insertBefore(el(id), foot); });
+  if (big) { ['maps', 'point', 'score'].forEach(function (id) { L.appendChild(el(id)); }); ['station', 'radar-card', 'daylight', 'today', 'tt'].forEach(function (id) { R.appendChild(el(id)); }); }
+  else ['station', 'radar-card', 'daylight', 'maps', 'point', 'score', 'today', 'tt'].forEach(function (id) { main.insertBefore(el(id), foot); });
 }
 function applyLayout() {
   var w = document.documentElement.clientWidth, mode = settings.layout || 'auto', cl = document.documentElement.classList, med, big;
@@ -20,7 +20,7 @@ function applyLayout() {
   placeCards(big);
   return changed;
 }
-function renderAll() { scheduleRender(); renderPoint(); renderHistory(); }
+function renderAll() { scheduleRender(); renderPoint(); renderHistory(); drawRadar(); }
 
 // ---------------------------------------------------------------- settings + diagnostics
 function openSettings() {
@@ -111,7 +111,7 @@ async function refreshAll(opts) {
   refreshing = true;
   var btn = el('refresh'); btn.classList.add('spin');
   try {
-    await Promise.all([loadStation(), loadPoint(!!opts.force), loadGrid({ force: !!opts.force }), loadHistory(histOffset === 0),loadAlerts(true), loadAQ(!!opts.force)]);
+    await Promise.all([loadStation(), loadPoint(!!opts.force), loadGrid({ force: !!opts.force }), loadHistory(histOffset === 0),loadAlerts(true), loadAQ(!!opts.force), loadRadar(true)]);
     renderPoint(); updateCompare(); scheduleRender();
     afterStation();
   } finally { refreshing = false; btn.classList.remove('spin'); }
@@ -169,7 +169,7 @@ function init() {
   setSubtitle();
   applyLayout(); renderDaylight();
   buildModelPicker(); buildLinks(); buildPtTabs(); buildTabs(); buildSnowSeg(); updateBanner();
-  initHistoryCharts(); initPointChart(); initPullToRefresh(); initServiceWorker();
+  initHistoryCharts(); initPointChart(); initPullToRefresh(); initServiceWorker(); initRadar();
   el('day-prev').addEventListener('click', function () { setHistDay(1); });
   el('day-next').addEventListener('click', function () { setHistDay(-1); });
   el('model').addEventListener('change', function (e) { switchModel(e.target.value); });
@@ -197,14 +197,14 @@ function init() {
     renderDaylight();
     if (!station || Date.now() - station.fetchedAt > 60000) loadStation();
     if (histOffset === 0 && Date.now() - histFetchedAt > 240000) loadHistory(true);
-    loadAlerts(false); loadAQ(false);
+    loadAlerts(false); loadAQ(false); loadRadar(false);
     if (!demo && Date.now() - gridCheckedAt > 10 * 60000) loadGrid({}).then(scheduleRender);
     if (!demo && Date.now() - pointFetchedAt > 3600000) loadPoint(false).then(function () { renderPoint(); updateCompare(); });
     afterStation();
   });
   setInterval(function () {
     if (document.visibilityState !== 'visible') return;
-    renderDaylight(); loadStation(); loadAlerts(false);
+    renderDaylight(); loadStation(); loadAlerts(false); loadRadar(false);
     if (histOffset === 0 && Date.now() - histFetchedAt > 290000) loadHistory(true);
     if (!demo && Date.now() - gridCheckedAt > 15 * 60000) loadGrid({}).then(scheduleRender);
   }, 60000);
