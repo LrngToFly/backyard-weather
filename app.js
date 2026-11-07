@@ -20,8 +20,8 @@
     ['Concord', 43.21, -71.54], ['New York', 40.71, -74.0], ['Hyannis', 41.65, -70.28], ['Utica', 43.10, -75.23]
   ];
   var VIEWS = [
-    { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (mm/hr)' },
-    { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (mm/hr) colored by type' },
+    { id: 'mslp_pcpn', label: 'MSLP & Precip', tt: 'mslp_pcpn', sub: 'Sea-level pressure (hPa) and precipitation rate (in/hr)' },
+    { id: 'mslp_pcpn_frzn', label: 'Rain / Frozen', tt: 'mslp_pcpn_frzn', sub: 'Sea-level pressure (hPa), precipitation rate (in/hr) colored by type' },
     { id: 'apcpn', label: 'Total Precip', tt: 'apcpn', sub: 'Precipitation accumulated since the first time shown (inches)' },
     { id: 'asnow', label: 'Total Snow', tt: 'asnow', sub: 'Snowfall accumulated since the first time shown (inches, 10:1 snow-to-water ratio)' },
     { id: 't2m', label: '2m Temp', tt: 'T2m', sub: '2-metre air temperature (°F); dark blue line = 32°F' }
@@ -744,15 +744,17 @@
     var css = getComputedStyle(document.documentElement), txt = css.getPropertyValue('--muted').trim() || '#667';
     ctx.font = '10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
     var i;
+    // rates are shaded on Tropical Tidbits' mm/hr break points but labelled in inches/hr
+    function inHr(mm) { var v = mm / 25.4; return String(+(v < 0.01 ? v.toFixed(3) : v.toFixed(2))); }
     // equal-width color boxes like the Tropical Tidbits color bars; a label sits on a box's left edge (its lower limit)
-    function bins(x0, bw, yy, thr, cols, wanted) {
+    function bins(x0, bw, yy, thr, cols, wanted, fmtr) {
       var n = thr.length, cw = bw / n, k;
       for (k = 0; k < n; k++) { ctx.fillStyle = cols[k]; ctx.fillRect(x0 + k * cw, yy, cw + 0.6, 12); }
       ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 0.6; ctx.strokeRect(x0, yy, bw, 12);
       ctx.fillStyle = txt; var last = -1e9;
       for (k = 0; k < n; k++) {
         if (wanted && wanted.indexOf(thr[k]) < 0) continue;
-        var lab = String(thr[k]), w = ctx.measureText(lab).width, cx = clamp(x0 + k * cw, x0 + w / 2, x0 + bw - w / 2);
+        var lab = fmtr ? fmtr(thr[k]) : String(thr[k]), w = ctx.measureText(lab).width, cx = clamp(x0 + k * cw, x0 + w / 2, x0 + bw - w / 2);
         if (cx - w / 2 < last + 3) continue;
         ctx.fillText(lab, cx, yy + 23); ctx.fillRect(x0 + k * cw - 0.3, yy + 12, 0.6, 3); last = cx + w / 2;
       }
@@ -766,13 +768,13 @@
     }
     if (view === 'apcpn') { bins(4, W - 8, 2, ACC_T, ACC_C, [0.01, 0.1, 0.3, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 14, 20, 24]); return; }
     if (view === 'asnow') { bins(4, W - 8, 2, SNOW_T, SNOW_C, [0.1, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48]); return; }
-    if (!frzn) { bins(4, W - 8, 2, RATE_T, RATE_C, null); return; }
-    var wr = [0.1, 0.5, 1.5, 2.5, 4, 6, 10, 16, 24], wf = [0.1, 0.5, 1, 2, 3, 4, 6, 10, 14]; // the same labels Tropical Tidbits prints
+    if (!frzn) { bins(4, W - 8, 2, RATE_T, RATE_C, null, inHr); return; }
+    var wr = [0.1, 0.5, 1.5, 2.5, 4, 6, 10, 16, 24], wf = [0.1, 0.5, 1, 2, 3, 4, 6, 10, 14]; // the same break points Tropical Tidbits labels
     var rows = [['Rain', RAIN_T, RAIN_C, wr], ['FrzR', FRZ_T, FRZR_C, wf], ['Sleet', FRZ_T, SLEET_C, wf], ['Snow', FRZ_T, SNOWR_C, wf]];
     rows.forEach(function (r, q) {
       ctx.fillStyle = txt; ctx.textAlign = 'left'; ctx.font = '600 10px -apple-system, system-ui, sans-serif'; ctx.fillText(r[0], 4, 2 + q * 30 + 10);
       ctx.font = '10px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
-      bins(44, W - 48, 2 + q * 30, r[1], r[2], r[3]);
+      bins(44, W - 48, 2 + q * 30, r[1], r[2], r[3], inHr);
     });
   }
 
