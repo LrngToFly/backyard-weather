@@ -15,6 +15,7 @@ Not for safety-critical decisions.
 
 - **Weather alerts**: active NWS watches, warnings and advisories for the station's location, at the top of the page. Tap one for the full text.
 - **Your station**: live temperature, wind, rain, pressure and more, today's high and low, rain totals for the last 7 days, this month and this year, and air quality (with tomorrow's forecast when AirNow is set up).
+- **Live radar**: the last 50 minutes of the NWS NEXRAD radar mosaic in 5-minute steps (from the Iowa Environmental Mesonet, free, no key), over the same area and county lines as the forecast maps, with play and slider controls.
 - **Daylight**: dawn, sunrise, solar peak, sunset, dusk and day length, to the minute, computed on the device for the station's exact coordinates.
 - **Forecast maps** (Euro, GFS, EC-AIFS, AIGFS, RRFS): MSLP & precip, Rain / Frozen, total precip, total snow (10:1 or Kuchera ratio), 2m temp, 2m dewpoint, 10m wind. Time slider and play button. The note under the map names the model run (for example "18z run").
 - **Forecast at your backyard**: 7-day chart and table with a Euro / GFS / AI Euro / AI GFS selector. Tap the chart to read it.

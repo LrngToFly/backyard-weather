@@ -1,4 +1,4 @@
-/* Backyard Weather (beta): live radar loop. Iowa Environmental Mesonet's US NEXRAD composite (base reflectivity),
+/* Backyard Weather: live radar loop. Iowa Environmental Mesonet's US NEXRAD composite (base reflectivity),
    the last 50 minutes in 5-minute frames, drawn over the same area, county lines and cities as the forecast maps.
    Free, no key. The images come as one picture per frame for exactly the map's area (WMS), so nothing is stitched here. */
 'use strict';
