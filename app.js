@@ -713,7 +713,8 @@
   }
   function geoLines(ctx, proj) {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(30,38,48,.42)'; ctx.lineWidth = 0.7; drawLines(ctx, GEO.states, proj);
+    if (GEO.counties) { ctx.strokeStyle = 'rgba(95,105,118,.45)'; ctx.lineWidth = 0.5; drawLines(ctx, GEO.counties, proj); }
+    ctx.strokeStyle = 'rgba(30,38,48,.55)'; ctx.lineWidth = 0.8; drawLines(ctx, GEO.states, proj);
     ctx.strokeStyle = 'rgba(15,20,28,.75)'; ctx.lineWidth = 1.1; drawLines(ctx, GEO.border, proj);
     ctx.strokeStyle = 'rgba(15,20,28,.85)'; ctx.lineWidth = 1; drawLines(ctx, GEO.coast, proj);
   }
@@ -734,8 +735,8 @@
       chains.forEach(function (ch) {
         if (ch.length < 3) return;
         pathChain(ctx, ch, g, proj);
-        ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = bold ? 3.6 : 2.6; ctx.stroke();
-        ctx.strokeStyle = 'rgba(12,16,24,.92)'; ctx.lineWidth = bold ? 1.7 : 1; ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 2.2; ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,.95)'; ctx.lineWidth = 0.9; ctx.stroke();
         if (lev % 8 === 0) {
           var len = 0, pts = ch.map(function (q) { return proj(DOM.lon0 + q[0] * g.deg, DOM.lat0 + q[1] * g.deg); });
           for (var s = 1; s < pts.length; s++) len += Math.hypot(pts[s][0] - pts[s - 1][0], pts[s][1] - pts[s - 1][1]);
