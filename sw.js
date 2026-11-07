@@ -8,7 +8,7 @@ var CACHE = 'backyard-shell';
 var SHELL = [
   './', 'style.css', 'geo.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png',
   'js/core.js', 'js/colors.js', 'js/demo.js', 'js/mapdata.js', 'js/mapdraw.js', 'js/point.js',
-  'js/station.js', 'js/extras.js', 'js/daylight.js', 'js/app.js'
+  'js/station.js', 'js/extras.js', 'js/daylight.js', 'js/radar.js', 'js/app.js'
 ];
 
 self.addEventListener('install', function (e) {

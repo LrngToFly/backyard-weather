@@ -66,7 +66,7 @@ main { padding: 0 max(16px, env(safe-area-inset-left)) 28px max(16px, env(safe-a
 }
 .tab.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .map-wrap { margin: 8px 0 4px; line-height: 0; border-radius: 12px; overflow: hidden; background: #ffffff; border: 1px solid var(--line); }
-#map { display: block; width: 100%; touch-action: pan-y; }
+#map, #radar { display: block; width: 100%; touch-action: pan-y; }
 .legend { display: block; margin: 6px 0 0; }
 .controls { display: flex; justify-content: center; gap: 10px; margin-top: 6px; }
 .ctl {

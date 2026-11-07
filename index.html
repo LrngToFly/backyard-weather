@@ -44,6 +44,20 @@
     <div id="station-body"><p class="muted">Loading…</p></div>
   </section>
 
+  <section class="card" id="radar-card">
+    <h2>Live radar <span class="chip">beta</span></h2>
+    <div id="radar-wrap" class="map-wrap"><canvas id="radar" aria-label="Radar loop"></canvas></div>
+    <canvas id="radar-legend" class="legend" aria-hidden="true"></canvas>
+    <div class="controls">
+      <button id="radar-prev" class="ctl" type="button" aria-label="Earlier scan">‹</button>
+      <button id="radar-play" class="ctl play" type="button" aria-label="Play radar">▶</button>
+      <button id="radar-next" class="ctl" type="button" aria-label="Later scan">›</button>
+    </div>
+    <input id="radar-slider" type="range" min="0" max="0" value="0" step="1" aria-label="Radar time">
+    <div id="radar-time" class="time-label">—</div>
+    <p id="radar-note" class="small muted"></p>
+  </section>
+
   <section class="card" id="daylight">
     <h2>Daylight</h2>
     <div id="daylight-body"></div>
@@ -175,6 +189,7 @@
 <script src="js/station.js"></script>
 <script src="js/extras.js"></script>
 <script src="js/daylight.js"></script>
+<script src="js/radar.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
