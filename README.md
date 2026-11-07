@@ -20,26 +20,33 @@ Not for safety-critical decisions.
 - **Models on Tropical Tidbits**: one-tap links to the matching Tropical Tidbits page for any model and map.
 - Phone and iPad layouts (automatic, or choose in Settings).
 
-## Install kit (iPhone / iPad)
+## Deployment guide
+
+The app is plain static files, so "deploying" it means publishing the folder with GitHub Pages (free) and then adding the page to your devices.
+
+### 1. Publish the site (once)
+
+1. Create a GitHub account if you need one, then fork or copy this repository, or create a new public repository and upload these files to its `main` branch.
+2. In the repository: **Settings, Pages**. Under "Build and deployment", choose **Deploy from a branch**, branch `main`, folder `/ (root)`, and save.
+3. After a minute or two the site is live at `https://<your-user>.github.io/<repo>/`. The `.nojekyll` file keeps GitHub from processing the files.
+4. Open that address in Safari to confirm it loads.
+
+### 2. Point it at your station (only if it isn't KMAHOPKI22 in Hopkinton)
+
+Edit the constants at the top of `app.js`: `HOME` (your latitude and longitude), `DOM` (the map area, about 7 by 4.5 degrees), the default `stationId` in the settings object, and `HOME_TZ` for the daylight card. The city title is in `index.html`.
+
+### 3. Set up each device (iPhone, iPad)
 
 1. **Get a Weather Underground API key** (free): sign in at https://www.wunderground.com/member/api-keys and copy the key for your station. Keep it private; do not paste it into this repo, an issue, or a chat.
-2. **Open the app** in Safari: https://lrngtofly.github.io/backyard-weather/
-3. **Add to Home Screen**: tap Share, then **Add to Home Screen**. Do this on each device (iPhone, iPad).
-4. **Open it from the Home Screen icon**, tap the gear (Settings), paste your API key, confirm the Station ID, and tap Save. The key is stored only on that device, so repeat on each device.
-5. Optional in Settings: Screen layout (Automatic / phone / iPad), Map detail (Standard / Fine), Animation speed.
+2. Open the site in Safari, tap Share, then **Add to Home Screen**.
+3. Open it from the Home Screen icon, tap the gear (Settings), paste the API key, confirm the Station ID, and tap Save. The key is stored only on that device, so repeat on each device.
+4. Optional in Settings: Screen layout (Automatic / phone / iPad), Map detail (Standard / Fine), Animation speed.
 
-### Updating
+### 4. Publishing updates
 
-When the app is updated, close it completely (swipe it away in the app switcher) and open it again. The refresh button in the app only reloads data, not the app itself. If something still looks old, Settings has "Clear saved maps".
-
-## Make your own copy (another station or location)
-
-1. Fork or copy this repository to your own GitHub account.
-2. In the repo: Settings, Pages, deploy from the `main` branch, root folder. The site appears at `https://<your-user>.github.io/<repo>/`.
-3. Edit the constants at the top of `app.js`:
-   - `HOME` (latitude / longitude of your location) and `DOM` (map area).
-   - The default `stationId` in the settings object, and `HOME_TZ` for the daylight card.
-4. When you change files, bump the `?v=` number on the script and stylesheet tags in `index.html` so devices pick up the new files.
+1. Change the files and bump the `?v=` number on the script and stylesheet tags in `index.html` so devices fetch the new versions.
+2. Commit and push to `main`. GitHub Pages republishes in a minute or two.
+3. On each device, close the app completely (swipe it away in the app switcher) and open it again. The refresh button in the app only reloads data, not the app itself. If something still looks old, Settings has "Clear saved maps".
 
 ## Notes and limits
 
