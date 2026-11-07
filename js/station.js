@@ -85,7 +85,7 @@ async function loadObsStore() {
 }
 function saveObs() {
   if (demo || !obsDays) return;
-  var cut = ymd(dayStart(400));
+  var cut = ymd(dayStart(1500)); // about 4 years of daily summaries (a few hundred KB)
   Object.keys(obsDays).forEach(function (k) { if (k < cut) delete obsDays[k]; });
   idb.set('obs-' + settings.stationId, { days: obsDays });
 }
@@ -115,38 +115,49 @@ async function loadDailySummaries(force) {
     log('Station daily summaries: ' + n + ' days');
   } catch (e) { log('Station daily summaries error: ' + friendlyError(e)); }
 }
-// Fill in older days one at a time (newest first), gently: one request every 2.5 s, at most 40 per visit and 150 a day.
-// Covers this year (for the rain totals) and at least the last 62 days (for the scorecard).
-var backfilling = false, backfillLeft = 0;
+// Fill in past days with Weather Underground's daily history, up to 31 days per request (one calendar month at a time,
+// newest first, one request every 2.5 s). Covers this year (rain totals, YTD) and the last 62 days (scorecard);
+// older months load when you open them in the Month view.
+var backfilling = false, backfillLeft = 0, obsBusy = false;
+// fetch daily summaries for every day from `from` to `to` (YYYYMMDD, inclusive) that isn't saved yet, a month per request
+async function ensureObsRange(from, to, maxReq) {
+  await loadObsStore();
+  var today = ymd(dayStart(0)), months = [], made = 0;
+  if (to >= today) to = ymd(dayStart(1));
+  for (var d = dsDate(to); ymd(d) >= from; d = new Date(d.getFullYear(), d.getMonth(), 0)) { // newest month first
+    var m0 = new Date(d.getFullYear(), d.getMonth(), 1), a = ymd(m0) < from ? from : ymd(m0), b = ymd(d);
+    var need = false;
+    for (var x = dsDate(a); ymd(x) <= b; x.setDate(x.getDate() + 1)) if (needsObs(obsDays[ymd(x)])) { need = true; break; }
+    if (need) months.push([a, b]);
+  }
+  backfillLeft = months.length;
+  // at most 60 month requests a day (Weather Underground allows 1,500 requests a day in all)
+  var cnt = store.get('wx.histReq', { day: '', n: 0 });
+  if (cnt.day !== today) cnt = { day: today, n: 0 };
+  for (var k = 0; k < months.length; k++) {
+    if (made >= (maxReq || 20) || cnt.n >= 60) break;
+    if (made) await sleep(2500);
+    var r = await fetch(wuUrl('history/daily', '&startDate=' + months[k][0] + '&endDate=' + months[k][1]), { cache: 'no-store' });
+    made++; cnt.n++; store.set('wx.histReq', cnt);
+    if (!r.ok && r.status !== 204) { log('Station history fill-in stopped: Weather Underground HTTP ' + r.status); break; }
+    var got = {};
+    if (r.status !== 204) ((await r.json()).observations || []).forEach(function (o) {
+      var ds = String(o.obsTimeLocal || '').slice(0, 10).replace(/-/g, '');
+      if (ds.length === 8 && ds < today) { obsDays[ds] = obsFromImperial(o.imperial || {}); got[ds] = 1; }
+    });
+    for (var y = dsDate(months[k][0]); ymd(y) <= months[k][1]; y.setDate(y.getDate() + 1)) if (!got[ymd(y)] && !obsDays[ymd(y)]) obsDays[ymd(y)] = { none: true };
+    backfillLeft--; saveObs();
+    log('Station history ' + months[k][0].slice(0, 6) + ': ' + Object.keys(got).length + ' days');
+    renderRainTotals(); renderScore();
+  }
+  return made;
+}
 async function backfillObs() {
   if (backfilling || demo || !settings.apiKey) return;
   backfilling = true;
   try {
-    await loadObsStore();
-    var need = [], jan1 = ymd(new Date(new Date().getFullYear(), 0, 1));
-    // days not loaded yet first, then days saved before dew point, wind and pressure were kept
-    var later = [];
-    for (var i = 1; i <= 400; i++) { var ds = ymd(dayStart(i)); if (i > 62 && ds < jan1) break; if (!obsDays[ds]) need.push(ds); else if (needsObs(obsDays[ds])) later.push(ds); }
-    need = need.concat(later);
-    backfillLeft = need.length;
-    var today = ymd(dayStart(0)), cnt = store.get('wx.bfCount', { day: '', n: 0 });
-    if (cnt.day !== today) cnt = { day: today, n: 0 };
-    var session = 0;
-    for (var k = 0; k < need.length; k++) {
-      if (session >= 40 || cnt.n >= 150 || document.visibilityState !== 'visible') break;
-      var r = await fetch(wuUrl('history/daily', '&date=' + need[k]), { cache: 'no-store' });
-      session++; cnt.n++; store.set('wx.bfCount', cnt);
-      if (r.status === 204) obsDays[need[k]] = { none: true };
-      else if (!r.ok) { log('Station history fill-in stopped: Weather Underground HTTP ' + r.status); break; }
-      else {
-        var j = await r.json(), o = j.observations && j.observations[0];
-        obsDays[need[k]] = o ? obsFromImperial(o.imperial || {}) : { none: true };
-      }
-      backfillLeft--;
-      if (session % 5 === 0) { saveObs(); renderRainTotals(); renderScore(); refreshDailyCharts(); }
-      await sleep(2500);
-    }
-    if (session) { saveObs(); log('Station history fill-in: ' + session + ' days loaded, ' + backfillLeft + ' still to go'); }
+    var jan1 = new Date(new Date().getFullYear(), 0, 1), d62 = dayStart(62);
+    await queueObsRange(ymd(d62 < jan1 ? d62 : jan1), ymd(dayStart(1)), 20);
   } catch (e) { log('Station history fill-in error: ' + friendlyError(e)); }
   finally { backfilling = false; renderRainTotals(); renderScore(); refreshDailyCharts(); }
 }
@@ -174,7 +185,8 @@ function renderRainTotals() {
 var hist = null, histOffset = 0, histFetchedAt = 0, histCache = {}, histMsg = 'Loading…', hoverT = null;
 var histRange = store.get('wx.histrange', 'day');
 if (['day', 'week', 'month', 'ytd'].indexOf(histRange) < 0) histRange = 'day';
-var weekCache = null;
+var weekOffset = 0, monthOffset = 0, weekCache = {};   // 0 = this week / this month; 1 = the one before, and so on
+var WEEK_BACK = 156, MONTH_BACK = 36, weekLoads = {};                    // how far back the arrows go (3 years)
 function histKey(ds) { return 'hist-' + settings.stationId + '-' + ds; }
 var histPruned = false;
 async function pruneHist() {
@@ -198,12 +210,31 @@ function parseObsRows(obs) {
   rows.sort(function (a, b) { return a.t - b.t; });
   return rows;
 }
+// calendar weeks (Sunday to Saturday) and months, like wunderground.com; the current one runs to today
+function weekStart(off) { var d = dayStart(0); d.setDate(d.getDate() - d.getDay() - 7 * off); return d; }
+function rangeBounds() {
+  var from, to;
+  if (histRange === 'week') { from = weekStart(weekOffset); to = weekOffset === 0 ? dayStart(-1) : new Date(from.getFullYear(), from.getMonth(), from.getDate() + 7); }
+  else if (histRange === 'month') { var n = new Date(); from = new Date(n.getFullYear(), n.getMonth() - monthOffset, 1); to = monthOffset === 0 ? dayStart(-1) : new Date(from.getFullYear(), from.getMonth() + 1, 1); }
+  else { from = new Date(new Date().getFullYear(), 0, 1); to = dayStart(-1); }
+  return { from: from, to: to, last: new Date(to.getFullYear(), to.getMonth(), to.getDate() - 1) };
+}
+// "Oct 25 – Oct 31, 2026", or "Dec 28, 2025 – Jan 3, 2026" across a new year
 function rangeLabel() {
-  return histRange === 'week' ? 'Last 7 days' : histRange === 'month' ? 'Last 30 days' : histRange === 'ytd' ? new Date().getFullYear() + ' to date' : '';
+  if (histRange === 'ytd') return new Date().getFullYear() + ' to date';
+  var b = rangeBounds(), o = { month: 'short', day: 'numeric' }, y = b.from.getFullYear() !== b.last.getFullYear();
+  return b.from.toLocaleDateString([], y ? { month: 'short', day: 'numeric', year: 'numeric' } : o) + ' – ' + b.last.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function updateNav() {
+  var off = histRange === 'week' ? weekOffset : histRange === 'month' ? monthOffset : histOffset, max = histRange === 'week' ? WEEK_BACK : histRange === 'month' ? MONTH_BACK : HIST_KEEP_DAYS;
+  el('day-prev').hidden = el('day-next').hidden = histRange === 'ytd';
+  el('day-prev').disabled = off >= max; el('day-next').disabled = off === 0;
+  el('day-prev').setAttribute('aria-label', 'Previous ' + (histRange === 'week' ? 'week' : histRange === 'month' ? 'month' : 'day'));
+  el('day-next').setAttribute('aria-label', 'Next ' + (histRange === 'week' ? 'week' : histRange === 'month' ? 'month' : 'day'));
 }
 async function loadHistory(force) {
-  el('day-prev').hidden = el('day-next').hidden = histRange !== 'day';
   el('hist-chip').textContent = histRange === 'day' ? '5-min' : histRange === 'week' ? 'hourly' : 'daily';
+  updateNav();
   if (histRange !== 'day') {
     el('day-label').textContent = rangeLabel();
     await loadDay(force, true, 0); // today's 5-minute readings: the high/low and the latest point
@@ -212,14 +243,12 @@ async function loadHistory(force) {
   }
   return loadDay(force, false, histOffset);
 }
-// quiet: load (and cache) a day without showing it, e.g. today while the Week, Month or YTD view is up
 async function loadDay(force, quiet, off) {
   var day = dayStart(off), ds = ymd(day), t0 = day.getTime() / 1000, t1 = dayStart(off - 1).getTime() / 1000;
   function away() { return !quiet && (histRange !== 'day' || histOffset !== off); } // switched to another day or view while loading
   if (!quiet) {
     var label = off === 0 ? 'Today' : off === 1 ? 'Yesterday' : day.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
     el('day-label').textContent = label + (off <= 1 ? ' · ' + day.toLocaleDateString([], { month: 'short', day: 'numeric' }) : '');
-    el('day-next').disabled = off === 0; el('day-prev').disabled = off >= HIST_KEEP_DAYS;
     histMsg = '';
   }
   function show(h) { if (!quiet) { hist = h; renderHistory(); } }
@@ -249,18 +278,30 @@ async function loadDay(force, quiet, off) {
   if (off === 0) renderHiLo();
 }
 // the last 7 days, hourly, in one request (kept for 10 minutes)
+// one calendar week of hourly readings: a single request (past weeks are saved on the device)
 async function loadWeek(force) {
-  var t1 = Date.now() / 1000, t0 = dayStart(7).getTime() / 1000;
+  var b = rangeBounds(), key = ymd(b.from), off = weekOffset, cur = off === 0;
+  var t0 = b.from.getTime() / 1000, t1 = cur ? Date.now() / 1000 : b.to.getTime() / 1000;
+  function stale() { return histRange !== 'week' || weekOffset !== off; }
   histMsg = '';
   if (demo) { hist = makeDemoWeek(t0, t1); renderHistory(); return; }
   if (!settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
-  if (weekCache && Date.now() - weekCache.fetchedAt < (force ? 60000 : 600000)) { hist = weekCache; renderHistory(); return; }
+  var c = weekCache[key];
+  if (!c && !cur) { c = await idb.get('week-' + settings.stationId + '-' + key); if (c) weekCache[key] = c; }
+  if (stale()) return;
+  if (c && (!cur || Date.now() - c.fetchedAt < (force ? 60000 : 600000))) { hist = c; renderHistory(); return; }
+  hist = null; histMsg = 'Loading…'; renderHistory();
   try {
-    var r = await fetch(wuUrl('observations/hourly/7day'), { cache: 'no-store' });
+    // quick taps on the arrows can ask for the same week twice: share one download
+    var p = weekLoads[key] || (weekLoads[key] = fetch(wuUrl('history/hourly', '&startDate=' + key + '&endDate=' + ymd(b.last)), { cache: 'no-store' })
+      .then(async function (res) { return { status: res.status, ok: res.ok, body: res.status === 204 || !res.ok ? null : await res.json() }; })
+      .finally(function () { setTimeout(function () { delete weekLoads[key]; }, 5000); }));
+    var r = await p;
     if (r.status === 401 || r.status === 403) throw new Error('Weather Underground rejected the key (HTTP ' + r.status + ')');
     if (!r.ok && r.status !== 204) throw new Error('Weather Underground HTTP ' + r.status);
-    var rows = r.status === 204 ? [] : parseObsRows((await r.json()).observations);
-    // rain: Weather Underground's total restarts each midnight, so carry it on into a 7-day total
+    var rows = r.body ? parseObsRows(r.body.observations) : [];
+    if (weekCache[key] && weekCache[key].fetchedAt > Date.now() - 5000) { if (stale()) return; hist = weekCache[key]; renderHistory(); return; } // another tap already finished it
+    // rain: Weather Underground's total restarts each midnight, so carry it on into a total for the week
     var carried = 0, dayTot = 0, lastDay = '';
     rows.forEach(function (x) {
       var d = ymd(new Date(x.t * 1000));
@@ -268,18 +309,19 @@ async function loadWeek(force) {
       if (x.acc !== null) dayTot = Math.max(dayTot, x.acc);
       x.acc = x.acc === null ? null : carried + x.acc;
     });
-    weekCache = { kind: 'hourly', t0: rows.length ? Math.min(t0, rows[0].t) : t0, t1: t1, rows: rows, fetchedAt: Date.now() };
-    log('Station week: ' + rows.length + ' hourly readings');
-    if (histRange !== 'week') return;
-    hist = weekCache; if (!rows.length) histMsg = 'No readings reported this week.';
+    c = { kind: 'hourly', t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
+    weekCache[key] = c;
+    if (!cur && rows.length) idb.set('week-' + settings.stationId + '-' + key, c);
+    log('Station week of ' + key + ': ' + rows.length + ' hourly readings');
+    if (stale()) return;
+    hist = c; histMsg = rows.length ? '' : 'No readings reported this week.';
   } catch (e) {
     log('Station week error: ' + friendlyError(e));
-    if (histRange !== 'week') return;
-    hist = weekCache; histMsg = 'Could not load the week: ' + friendlyError(e);
+    if (stale()) return;
+    hist = c || null; histMsg = 'Could not load this week: ' + friendlyError(e);
   }
   renderHistory();
 }
-// one point per day (at midday), from the saved daily summaries plus today so far
 function dayRow(ds, o) {
   var d = dsDate(ds);
   return { t: d.getTime() / 1000 + 43200, ds: ds, hi: o.hi, lo: o.lo, dew: o.dew != null ? o.dew : null, wmax: o.wmax != null ? o.wmax : null, gust: o.gust != null ? o.gust : null,
@@ -299,25 +341,42 @@ function summarizeRows(rows) {
   o.dew = dn ? ds / dn : null;
   return o;
 }
+// one point per day: a calendar month, or the year to date. Days not saved yet are loaded first (a month per request).
 async function loadDaily() {
   histMsg = '';
   if (!demo && !settings.apiKey) { hist = null; histMsg = 'Add your Weather Underground API key in Settings to see the station charts.'; renderHistory(); return; }
   await loadObsStore();
-  if (histRange !== 'month' && histRange !== 'ytd') return;
-  var first = histRange === 'month' ? dayStart(29) : new Date(new Date().getFullYear(), 0, 1), today = ymd(dayStart(0)), rows = [], missing = 0, partial = 0, acc = 0;
-  for (var d = new Date(first); ymd(d) <= today; d.setDate(d.getDate() + 1)) {
+  var b = rangeBounds(), want = histRange + monthOffset, today = ymd(dayStart(0));
+  function stale() { return (histRange + monthOffset) !== want; }
+  if (stale()) return;
+  if (!demo) {
+    var from = ymd(b.from), lastPast = ymd(b.last) < today ? ymd(b.last) : ymd(dayStart(1)), gaps = false;
+    for (var x = new Date(b.from); ymd(x) <= lastPast; x.setDate(x.getDate() + 1)) if (needsObs(obsDays[ymd(x)])) { gaps = true; break; }
+    if (gaps && from <= lastPast) {
+      if (!hist || hist.kind !== 'daily') { hist = null; histMsg = 'Loading…'; renderHistory(); }
+      await queueObsRange(from, lastPast, histRange === 'ytd' ? 12 : 2);
+      if (stale()) return;
+    }
+  }
+  var rows = [], missing = 0, acc = 0;
+  for (var d = new Date(b.from); d < b.to; d.setDate(d.getDate() + 1)) {
     var ds = ymd(d), o = ds === today ? (histCache[ds] && summarizeRows(histCache[ds].rows)) : obsDays[ds];
-    if (!o) { missing++; continue; }
+    if (o && ds === today && station && station.rainToday > o.rain) o.rain = station.rainToday; // the live reading is ahead of the 5-minute history
+    if (!o) { if (ds < today) missing++; continue; }
     if (o.none) continue;
-    if (o.v !== 2) partial++;
     var row = dayRow(ds, o);
     if (row.rain != null) acc += row.rain;
     row.acc = acc; rows.push(row);
   }
-  hist = { kind: 'daily', t0: first.getTime() / 1000, t1: dayStart(-1).getTime() / 1000, rows: rows, fetchedAt: Date.now() };
-  if (missing || partial) histMsg = (missing ? missing + ' day' + (missing === 1 ? '' : 's') + ' not loaded yet' : '') + (missing && partial ? '; ' : '') +
-    (partial ? partial + ' day' + (partial === 1 ? '' : 's') + ' still need dew point, wind and pressure' : '') + '. Past days load from Weather Underground a few at a time over the next few visits.';
+  hist = { kind: 'daily', t0: b.from.getTime() / 1000, t1: b.to.getTime() / 1000, rows: rows, fetchedAt: Date.now() };
+  histMsg = !rows.length ? 'No readings reported for these days.' : missing ? missing + ' day' + (missing === 1 ? '' : 's') + ' could not be loaded yet; they will be tried again on your next visit.' : '';
   renderHistory();
+}
+// one history download at a time (the background fill-in and the charts share it)
+var obsQueue = Promise.resolve();
+function queueObsRange(from, to, maxReq) {
+  obsQueue = obsQueue.then(function () { return ensureObsRange(from, to, maxReq); }).catch(function (e) { log('Station history error: ' + friendlyError(e)); });
+  return obsQueue;
 }
 function refreshDailyCharts() { if (histRange === 'month' || histRange === 'ytd') loadDaily(); }
 function buildRangeSeg() {
@@ -333,7 +392,6 @@ function buildRangeSeg() {
     box.appendChild(b);
   });
 }
-// a full past day of 5-minute readings also gives that day's summary for free
 async function summarizeDay(ds, rows) {
   await loadObsStore(); if (!needsObs(obsDays[ds])) return;
   var o = summarizeRows(rows); if (!o) return;
@@ -481,7 +539,7 @@ function renderHistory() {
       sp.appendChild(sw); sp.appendChild(document.createTextNode(s.name + ' (' + s.unit.trim() + ')')); box.appendChild(sp);
     });
   });
-  var msg = el('hist-msg'); msg.hidden = !histMsg || (hist && hist.rows.length > 0 && !/Could not|not loaded|still need/.test(histMsg)); msg.textContent = histMsg;
+  var msg = el('hist-msg'); msg.hidden = !histMsg || (hist && hist.rows.length > 0 && !/could not|not loaded|still need/i.test(histMsg)); msg.textContent = histMsg;
   var sum = el('hist-sum'), rows = hist ? hist.rows : [];
   if (!rows.length) { sum.textContent = ''; return; }
   var daily = hist.kind === 'daily', hiT = -Infinity, loT = Infinity, hiAt = null, loAt = null, pk = 0, pkAt = null, rain = 0;
@@ -506,6 +564,11 @@ function initHistoryCharts() {
     }, function () { if (hoverT !== null) { hoverT = null; renderHistory(); } }, function () { return hoverT !== null; });
   });
 }
+// ‹ (delta +1) goes back one day, week or month; › (delta -1) comes forward
 function setHistDay(delta) {
-  histOffset = clamp(histOffset + delta, 0, HIST_KEEP_DAYS); hoverT = null; loadHistory(false);
+  if (histRange === 'week') weekOffset = clamp(weekOffset + delta, 0, WEEK_BACK);
+  else if (histRange === 'month') monthOffset = clamp(monthOffset + delta, 0, MONTH_BACK);
+  else if (histRange === 'day') histOffset = clamp(histOffset + delta, 0, HIST_KEEP_DAYS);
+  else return;
+  hoverT = null; loadHistory(false);
 }
