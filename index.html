@@ -44,6 +44,12 @@
     <div id="station-body"><p class="muted">Loading…</p></div>
   </section>
 
+  <section class="card" id="daylight">
+    <h2>Daylight</h2>
+    <div id="daylight-body"></div>
+    <p id="daylight-note" class="small muted"></p>
+  </section>
+
   <section class="card" id="radar-card">
     <h2>Live radar</h2>
     <div id="radar-wrap" class="map-wrap"><canvas id="radar" aria-label="Radar loop"></canvas></div>
@@ -58,11 +64,6 @@
     <p id="radar-note" class="small muted"></p>
   </section>
 
-  <section class="card" id="daylight">
-    <h2>Daylight</h2>
-    <div id="daylight-body"></div>
-    <p id="daylight-note" class="small muted"></p>
-  </section>
 
   <section class="card" id="maps">
     <h2>Forecast maps <span id="model-chip" class="chip">Euro</span></h2>
@@ -122,7 +123,7 @@
     <div id="score-body"></div>
   </section>
 
-  <div id="colL"></div><div id="colR"></div>
+  <div id="colL"></div><div id="colR"></div><div id="colB"></div>
 
   <footer class="small muted">
     Model data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (ECMWF, NOAA GFS, AIGFS and RRFS open data, CC BY 4.0). Snowfall uses a 10:1 snow-to-water ratio, or the Kuchera ratio when chosen.

@@ -2,13 +2,18 @@
 'use strict';
 
 // ---------------------------------------------------------------- screen layout (phone / iPad portrait / iPad landscape)
-// two columns on a landscape iPad: map and backyard forecast on the left; station, radar, daylight, charts, links and scorecard on the right
+// landscape iPad: two columns on top (map and backyard forecast on the left; station, daylight and radar on the right),
+// then a full-width section: the station charts two to a row, then Tropical Tidbits and the scorecard side by side
 var placedBig = null;
 function placeCards(big) {
   if (placedBig === big) return; placedBig = big;
-  var main = document.querySelector('main'), foot = document.querySelector('footer'), L = el('colL'), R = el('colR');
-  if (big) { ['maps', 'point'].forEach(function (id) { L.appendChild(el(id)); }); ['station', 'radar-card', 'daylight', 'today', 'tt', 'score'].forEach(function (id) { R.appendChild(el(id)); }); }
-  else ['station', 'radar-card', 'daylight', 'maps', 'point', 'today', 'tt', 'score'].forEach(function (id) { main.insertBefore(el(id), foot); });
+  var main = document.querySelector('main'), foot = document.querySelector('footer'), L = el('colL'), R = el('colR'), B = el('colB');
+  if (big) {
+    ['maps', 'point'].forEach(function (id) { L.appendChild(el(id)); });
+    ['station', 'daylight', 'radar-card'].forEach(function (id) { R.appendChild(el(id)); });
+    ['today', 'tt', 'score'].forEach(function (id) { B.appendChild(el(id)); });
+  }
+  else ['station', 'daylight', 'radar-card', 'maps', 'point', 'today', 'tt', 'score'].forEach(function (id) { main.insertBefore(el(id), foot); });
 }
 function applyLayout() {
   var w = document.documentElement.clientWidth, mode = settings.layout || 'auto', cl = document.documentElement.classList, med, big;

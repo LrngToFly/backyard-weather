@@ -136,8 +136,13 @@ details summary { min-height: 36px; display: flex; align-items: center; color: v
 .w-big .links { grid-template-columns: 1fr; }
 .w-big .card { margin: 0 0 14px; }
 [hidden] { display: none !important; }
-#colL, #colR { display: none; }
+#colL, #colR, #colB { display: none; }
 .w-big #colL, .w-big #colR { display: block; }
+/* landscape iPad: full-width section under the two columns */
+.w-big #colB { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 16px; align-items: start; }
+.w-big #colB > #today { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 22px; }
+.w-big #today > :not(.hchart) { grid-column: 1 / -1; }
+.w-big #colB .links { grid-template-columns: repeat(2, 1fr); }
 .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
 .sun-tiles { grid-template-columns: repeat(3, 1fr); }
 .tile.next { box-shadow: inset 0 0 0 2px var(--accent); }
