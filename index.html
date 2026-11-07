@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=15">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 <header class="top">
@@ -57,6 +57,13 @@
     <p id="map-note" class="small muted"></p>
   </section>
 
+  <section class="card" id="point">
+    <h2>Euro at your backyard</h2>
+    <div id="chart-wrap"><canvas id="chart" aria-label="Five day forecast chart"></canvas></div>
+    <div id="daily" class="daily"></div>
+    <p id="point-note" class="small muted"></p>
+  </section>
+
   <section class="card" id="today">
     <h2>Station charts <span class="chip">5-min</span></h2>
     <div class="daynav">
@@ -75,13 +82,6 @@
     <div class="hchart"><h3>Pressure</h3><canvas id="h-pres" aria-label="Pressure chart"></canvas>
       <div class="hleg"><span><i style="background:var(--text)"></i>Pressure (in)</span></div></div>
     <p class="small muted">Touch and slide along a chart to read the values.</p>
-  </section>
-
-  <section class="card" id="point">
-    <h2>Euro at your backyard</h2>
-    <div id="chart-wrap"><canvas id="chart" aria-label="Five day forecast chart"></canvas></div>
-    <div id="daily" class="daily"></div>
-    <p id="point-note" class="small muted"></p>
   </section>
 
   <section class="card" id="tt">
@@ -144,7 +144,7 @@
   </form>
 </dialog>
 
-<script src="geo.js?v=15"></script>
-<script src="app.js?v=15"></script>
+<script src="geo.js?v=16"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

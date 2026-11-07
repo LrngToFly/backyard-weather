@@ -1031,7 +1031,7 @@
     if (placedBig === big) return; placedBig = big;
     var main = document.querySelector('main'), foot = document.querySelector('footer'), L = el('colL'), R = el('colR');
     if (big) { ['maps', 'point'].forEach(function (id) { L.appendChild(el(id)); }); ['station', 'today', 'tt'].forEach(function (id) { R.appendChild(el(id)); }); }
-    else ['station', 'maps', 'today', 'point', 'tt'].forEach(function (id) { main.insertBefore(el(id), foot); });
+    else ['station', 'maps', 'point', 'today', 'tt'].forEach(function (id) { main.insertBefore(el(id), foot); });
   }
   function applyLayout() {
     var w = document.documentElement.clientWidth, mode = settings.layout || 'auto', cl = document.documentElement.classList, med, big;
