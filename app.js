@@ -1085,7 +1085,7 @@
     var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
     var css = getComputedStyle(document.documentElement), txt = css.getPropertyValue('--muted').trim() || '#667', line = css.getPropertyValue('--line').trim() || '#ddd';
     var pd = pointData; if (pd && pd.pid && pd.pid !== ptModelId) pd = null; if (!pd) { el('daily').innerHTML = ''; return; }
-    var now = Date.now() / 1000, t0 = now, t1 = now + 120 * 3600, idx = [];
+    var now = Date.now() / 1000, t0 = now, t1 = now + 168 * 3600, idx = [];
     for (var i = 0; i < pd.times.length; i++) if (pd.times[i] >= t0 - 3600 && pd.times[i] <= t1) idx.push(i);
     if (idx.length < 2) return;
     var tmin = Infinity, tmax = -Infinity, pmax = 0.05;
@@ -1114,7 +1114,7 @@
     ctx.fillStyle = txt; ctx.fillText('now', X(now) + 3, H - 5);
     // daily table
     var rows = [], day = localDayStart(now);
-    for (var n = 0; n < 5; n++) {
+    for (var n = 0; n < 7; n++) {
       var a = day + n * 86400, b = a + 86400, hi = -Infinity, lo = Infinity, pr = 0, any = false;
       for (var q = 0; q < pd.times.length; q++) {
         var tt = pd.times[q]; if (tt < Math.max(a, now - 3600) || tt >= b) continue;
