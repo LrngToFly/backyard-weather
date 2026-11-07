@@ -236,7 +236,7 @@
   // 10 m wind speed: Tropical Tidbits bands, 2 knots wide from 4 kt (below 4 kt stays white). Shaded on those knot break points, labelled in mph.
   var WIND_T = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86];
   var WIND_C = [
-    '#bdf9fd', '#ade7ef', '#9ed7e1', '#90c6d3', '#81b6c4', '#74a7b7', '#6796a9', '#5a879c',
+    '#bdf9fd', '#ade7ef', '#9fd8e2', '#90c7d3', '#81b6c4', '#74a7b7', '#6796a9', '#5a879c',
     '#6dad4a', '#7cbc58', '#95cc66', '#b3db74', '#d6ed83', '#fafd93', '#f0df6e', '#e1ad56',
     '#d77e3f', '#d15b2c', '#cf4a22', '#af3e1b', '#8e3015', '#6e230d', '#4f1b12', '#9438f4',
     '#9f45f4', '#ac5cf4', '#bc78f6', '#cd97f7', '#dfb7f9', '#f1d7fb', '#eccbe7', '#e9bdd3',
