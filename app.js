@@ -1121,7 +1121,7 @@
     box.innerHTML = '<div class="tiles sun-tiles">' + tl('dawn', 'Dawn') + tl('rise', 'Rise') + tl('noon', 'Peak') + tl('set', 'Set') + tl('dusk', 'Dusk') +
       '<div class="tile"><div class="k">Length</div><div class="v">' + (len === null ? '–' : durTxt(len)) + '</div></div></div>';
     var diff = (len !== null && ylen !== null) ? Math.round((len - ylen) / 1000) : null, dtxt = '';
-    if (diff !== null) { var a = Math.abs(diff); dtxt = ' Days are getting ' + (diff >= 0 ? 'longer' : 'shorter') + ' by ' + (a >= 60 ? Math.floor(a / 60) + 'm ' + pad2(a % 60) + 's' : a + 's') + ' per day.'; }
+    if (diff !== null) { var a = Math.round(Math.abs(diff) / 60); dtxt = ' Days are getting ' + (diff >= 0 ? 'longer' : 'shorter') + ' by ' + (a < 1 ? 'less than a minute' : a + (a === 1 ? ' minute' : ' minutes')) + ' per day.'; }
     el('daylight-note').textContent = 'Dawn and dusk are civil twilight (sun 6° below the horizon); Peak is solar noon. For ' + Math.abs(L.lat).toFixed(3) + '°' + (L.lat >= 0 ? 'N' : 'S') + ' ' + Math.abs(L.lon).toFixed(3) + '°' + (L.lon >= 0 ? 'E' : 'W') + (store.get('wx.loc', null) && !demo ? ' (your station)' : ' (Hopkinton)') + '.' + dtxt;
   }
 
