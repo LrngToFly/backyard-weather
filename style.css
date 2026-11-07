@@ -130,7 +130,7 @@ details summary { min-height: 36px; display: flex; align-items: center; color: v
 .w-med .card { padding: 18px; border-radius: 18px; }
 .w-big main, .w-big .top { max-width: 1280px; }
 .w-big main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); column-gap: 16px; align-items: start; }
-.w-big #banner, .w-big footer { grid-column: 1 / -1; }
+.w-big #banner, .w-big #update, .w-big #alerts, .w-big footer { grid-column: 1 / -1; }
 .w-big #colL, .w-big #colR { display: block; min-width: 0; }
 .w-big .tiles { grid-template-columns: repeat(2, 1fr); }
 .w-big .links { grid-template-columns: 1fr; }
@@ -144,3 +144,52 @@ details summary { min-height: 36px; display: flex; align-items: center; color: v
 .w-med .sun-tiles { grid-template-columns: repeat(6, 1fr); }
 .w-big .sun-tiles { grid-template-columns: repeat(3, 1fr); }
 #daylight-note { margin: 10px 0 0; }
+
+/* ---- today's high/low, rain totals, air quality ---- */
+.hilo { font-size: 14px; }
+.rain-tiles { grid-template-columns: repeat(3, 1fr); margin-top: 8px; }
+.w-med .rain-tiles, .w-big .rain-tiles { grid-template-columns: repeat(3, 1fr); }
+#rain-tot .small { margin: 6px 0 0; }
+.aq { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 12px; }
+.aq-dot { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+.aq-main { font-size: 15px; }
+.aq-cat { color: var(--muted); }
+#compare { margin-top: 10px; }
+
+/* ---- NWS alerts ---- */
+.alerts { margin: 8px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.w-big .alerts { margin-bottom: 14px; }
+.alert { border-radius: 12px; padding: 0 12px; border-left: 6px solid; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.alert summary { min-height: 48px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; cursor: pointer; font-size: 15px; }
+.alert summary .until { color: var(--muted); font-size: 13px; }
+.alert[open] { padding-bottom: 10px; }
+.alert p { margin: 6px 0; }
+.alert-text { white-space: pre-wrap; font-size: 14px; }
+.sev-high { border-color: #d42a2a; }
+.sev-high summary b { color: #d42a2a; }
+.sev-mid { border-color: #e07b00; }
+.sev-mid summary b { color: #c06800; }
+.sev-low { border-color: #d6b400; }
+@media (prefers-color-scheme: dark) { .sev-high summary b { color: #ff7a7a; } .sev-mid summary b { color: #ffb067; } }
+
+/* ---- Kuchera / 10:1 switch and the scorecard ---- */
+.seg2 { grid-template-columns: repeat(2, 1fr); }
+.seg3 { grid-template-columns: repeat(3, 1fr); }
+table.score { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 14px; }
+table.score th, table.score td { text-align: right; padding: 7px 4px; border-top: 1px solid var(--line); }
+table.score th:first-child, table.score td:first-child { text-align: left; }
+table.score th { font-size: 12px; color: var(--muted); font-weight: 600; border-top: 0; }
+table.score td.best { font-weight: 700; color: var(--accent); }
+.score-h { font-weight: 650; margin: 12px 0 2px; }
+ul.bias { margin: 0 0 8px; padding-left: 18px; }
+ul.bias li { margin: 2px 0; }
+
+/* ---- pull to refresh ---- */
+.ptr {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 8px); z-index: 10; width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--card); color: var(--muted); box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  transform: translate(-50%, -44px); opacity: 0; pointer-events: none;
+}
+.ptr.ready { color: var(--accent); }
+.ptr.busy svg { animation: spin 1s linear infinite; }
+#update .btn { min-height: 36px; }

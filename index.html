@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Backyard Weather</title>
-<meta name="description" content="Live backyard station readings with ECMWF (Euro) forecast maps.">
+<meta name="description" content="Live backyard station readings with forecast maps, alerts and a model scorecard.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Backyard">
@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=25">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="top">
@@ -32,8 +32,12 @@
   </div>
 </header>
 
+<div id="ptr" class="ptr" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
 <main>
   <div id="banner" class="banner" hidden></div>
+  <div id="update" class="banner tip" hidden><span>A new version of the app is ready.</span><button id="update-reload" type="button" class="btn">Reload</button></div>
+  <section id="alerts" class="alerts" aria-label="Weather alerts" hidden></section>
 
   <section class="card" id="station">
     <h2>Your station <span class="chip">live</span></h2>
@@ -50,6 +54,7 @@
     <h2>Forecast maps <span id="model-chip" class="chip">Euro</span></h2>
     <label class="model-pick">Model <select id="model" aria-label="Forecast model"></select></label>
     <div id="tabs" class="tabs" role="tablist" aria-label="Map view"></div>
+    <div id="snow-seg" class="seg seg2" aria-label="Snow ratio" hidden></div>
     <p id="map-sub" class="small muted"></p>
     <div id="map-wrap" class="map-wrap"><canvas id="map" aria-label="Forecast map"></canvas></div>
     <canvas id="legend" class="legend" aria-hidden="true"></canvas>
@@ -69,6 +74,11 @@
     <div id="chart-wrap"><canvas id="chart" aria-label="Seven day forecast chart"></canvas></div>
     <div id="daily" class="daily"></div>
     <p id="point-note" class="small muted"></p>
+  </section>
+
+  <section class="card" id="score">
+    <h2>Model scorecard <span class="chip">your station</span></h2>
+    <div id="score-body"></div>
   </section>
 
   <section class="card" id="today">
@@ -101,8 +111,8 @@
   <div id="colL"></div><div id="colR"></div>
 
   <footer class="small muted">
-    Model data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (ECMWF, NOAA GFS, AIGFS and RRFS open data, CC BY 4.0). Snowfall is estimated at a 10:1 snow-to-water ratio.
-    Station data: Weather Underground. Not for safety-critical decisions.
+    Model data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (ECMWF, NOAA GFS, AIGFS and RRFS open data, CC BY 4.0). Snowfall uses a 10:1 snow-to-water ratio, or the Kuchera ratio when chosen.
+    Station data: Weather Underground. Alerts: National Weather Service. Air quality: AirNow (EPA) or Open-Meteo. Not for safety-critical decisions.
   </footer>
 </main>
 
@@ -113,6 +123,10 @@
       <input id="set-key" type="text" class="secret" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your key">
     </label>
     <p class="small muted">Stored only on this device. Get a free key at wunderground.com/member/api-keys.</p>
+    <label>AirNow API key (optional)
+      <input id="set-airnow" type="text" class="secret" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your key">
+    </label>
+    <p class="small muted">For official air quality readings. Without it, an Open-Meteo estimate is shown. Free at docs.airnowapi.org.</p>
     <label>Station ID
       <input id="set-station" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
     </label>
@@ -137,7 +151,7 @@
     <label class="check"><input id="set-demo" type="checkbox"> Demo mode (made-up data, for testing)</label>
     <div class="row">
       <button id="set-check" class="btn" type="button">Run checks</button>
-      <button id="set-clear" class="btn" type="button">Clear saved maps</button>
+      <button id="set-clear" class="btn" type="button">Clear saved data</button>
     </div>
     <pre id="check-out" class="out small"></pre>
     <details>
@@ -151,7 +165,16 @@
   </form>
 </dialog>
 
-<script src="geo.js?v=25"></script>
-<script src="app.js?v=25"></script>
+<script src="geo.js"></script>
+<script src="js/core.js"></script>
+<script src="js/colors.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/mapdata.js"></script>
+<script src="js/mapdraw.js"></script>
+<script src="js/point.js"></script>
+<script src="js/station.js"></script>
+<script src="js/extras.js"></script>
+<script src="js/daylight.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
