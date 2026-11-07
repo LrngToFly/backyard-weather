@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 <header class="top">
@@ -66,7 +66,8 @@
 
   <section class="card" id="tt">
     <h2>Compare on Tropical Tidbits</h2>
-    <p class="small muted">Opens the selected model's page in your browser. The maps above are drawn by this app from open data, so they will look a little different.</p>
+    <label class="model-pick">Model <select id="tt-model" aria-label="Tropical Tidbits model"></select></label>
+    <p class="small muted">Opens this model's page in your browser. It is separate from the model chosen above. The maps above are drawn by this app from open data, so they will look a little different.</p>
     <div id="links" class="links"></div>
   </section>
 
@@ -114,7 +115,7 @@
   </form>
 </dialog>
 
-<script src="geo.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="geo.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

@@ -201,6 +201,7 @@
   var station = null;
   var gridNote = '';
   var modelId = store.get('wx.model', 'ecmwf');
+  var ttModelId = store.get('wx.ttmodel', 'ecmwf'); // Tropical Tidbits links have their own model choice
   if (!MODELS.some(function (m) { return m.id === modelId; })) modelId = 'ecmwf';
   function curModel() { return MODELS.filter(function (m) { return m.id === modelId; })[0]; }
   function effDetail(M) { return M.fine ? 'fine' : settings.detail; }
@@ -810,9 +811,13 @@
     MODELS.forEach(function (m) { var o = document.createElement('option'); o.value = m.id; o.textContent = m.label; sel.appendChild(o); });
     sel.value = modelId;
     el('model-chip').textContent = curModel().short;
+    var ts = el('tt-model'); ts.innerHTML = '';
+    MODELS.forEach(function (m) { var o = document.createElement('option'); o.value = m.id; o.textContent = m.label; ts.appendChild(o); });
+    if (!MODELS.some(function (m) { return m.id === ttModelId; })) ttModelId = 'ecmwf';
+    ts.value = ttModelId;
   }
   function buildLinks() {
-    var M = curModel(), links = el('links'); links.innerHTML = '';
+    var M = MODELS.filter(function (m) { return m.id === ttModelId; })[0] || MODELS[0], links = el('links'); links.innerHTML = '';
     VIEWS.forEach(function (v) {
       var pkg = (v.id === 'mslp_pcpn_frzn' && M.noFrzn) ? 'mslp_pcpn' : v.tt;
       var a = document.createElement('a'); a.className = 'link'; a.href = TT_BASE + '&model=' + M.tt + '&pkg=' + pkg; a.target = '_blank'; a.rel = 'noopener';
@@ -823,7 +828,7 @@
   async function switchModel(id) {
     var oldT = gridData && gridData.steps && gridData.steps[stepIdx] ? gridData.steps[stepIdx].t : null;
     stopPlay(); modelId = id; store.set('wx.model', id);
-    el('model-chip').textContent = curModel().short; buildLinks();
+    el('model-chip').textContent = curModel().short;
     gridData = null; gridNote = ''; stepCache.clear(); scheduleRender();
     el('map-note').textContent = 'Loading ' + curModel().short + '…'; el('map-note').className = 'small muted';
     await loadGrid(false);
@@ -1009,6 +1014,7 @@
     buildModelPicker(); buildLinks();
     buildTabs(); updateBanner();
     el('model').addEventListener('change', function (e) { switchModel(e.target.value); });
+    el('tt-model').addEventListener('change', function (e) { ttModelId = e.target.value; store.set('wx.ttmodel', ttModelId); buildLinks(); });
     el('slider').addEventListener('input', function (e) { stopPlay(); setStep(+e.target.value); });
     el('prev').addEventListener('click', function () { stopPlay(); setStep(stepIdx - 1); });
     el('next').addEventListener('click', function () { stopPlay(); setStep(stepIdx + 1); });
