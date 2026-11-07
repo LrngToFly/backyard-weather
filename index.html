@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 <header class="top">
@@ -72,6 +72,8 @@
       <div class="hleg"><span><i style="background:#4054a8"></i>Wind Speed (mph)</span><span><i style="background:#d19a55"></i>Gust (mph)</span></div></div>
     <div class="hchart"><h3>Precipitation</h3><canvas id="h-rain" aria-label="Precipitation chart"></canvas>
       <div class="hleg"><span><i style="background:#7ba3d8"></i>Precip. Accum. Total (in)</span><span><i style="background:#7f9f5e"></i>Precip. Rate (in/hr)</span></div></div>
+    <div class="hchart"><h3>Pressure</h3><canvas id="h-pres" aria-label="Pressure chart"></canvas>
+      <div class="hleg"><span><i style="background:var(--text)"></i>Pressure (in)</span></div></div>
     <p class="small muted">Touch and slide along a chart to read the values.</p>
   </section>
 
@@ -142,7 +144,7 @@
   </form>
 </dialog>
 
-<script src="geo.js?v=14"></script>
-<script src="app.js?v=14"></script>
+<script src="geo.js?v=15"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

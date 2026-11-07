@@ -882,7 +882,8 @@
         rows.push({
           t: t, temp: num(im.tempAvg, im.temp, im.tempHigh), dew: num(im.dewptAvg, im.dewpt, im.dewptHigh),
           wind: num(im.windspeedAvg, im.windSpeed, im.windspeedHigh), gust: num(im.windgustHigh, im.windgustAvg, im.windGust),
-          rate: num(im.precipRate), acc: num(im.precipTotal)
+          rate: num(im.precipRate), acc: num(im.precipTotal),
+          pres: (im.pressureMax != null && im.pressureMin != null && !isNaN(im.pressureMax) && !isNaN(im.pressureMin)) ? (+im.pressureMax + +im.pressureMin) / 2 : num(im.pressureMax, im.pressureMin, im.pressure)
         });
       });
       rows.sort(function (a, b) { return a.t - b.t; });
@@ -911,22 +912,26 @@
     { id: 'h-wind', zero: true, dp: 1, series: [
       { key: 'wind', name: 'Wind Speed', unit: ' mph', color: '#4054a8', type: 'line' }, { key: 'gust', name: 'Gust', unit: ' mph', color: '#d19a55', type: 'dots' }] },
     { id: 'h-rain', zero: true, dp: 2, minMax: 0.4, series: [
-      { key: 'acc', name: 'Precip. Accum. Total', unit: ' in', color: '#7ba3d8', type: 'line', dp: 2 }, { key: 'rate', name: 'Precip. Rate', unit: ' in/hr', color: '#7f9f5e', type: 'line', dp: 2 }] }
+      { key: 'acc', name: 'Precip. Accum. Total', unit: ' in', color: '#7ba3d8', type: 'line', dp: 2 }, { key: 'rate', name: 'Precip. Rate', unit: ' in/hr', color: '#7f9f5e', type: 'line', dp: 2 }] },
+    { id: 'h-pres', zero: false, pad: 0.012, minSpan: 0.08, dp: 2, series: [
+      { key: 'pres', name: 'Pressure', unit: ' in', color: 'text', type: 'line', dp: 2 }] }
   ];
   function drawHChart(cfg) {
     var cv = el(cfg.id), W = Math.floor(cv.parentNode.getBoundingClientRect().width) || 320, H = clamp(Math.round(W * 0.46), 160, 230), dpr = Math.min(window.devicePixelRatio || 1, 3);
     cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
     var css = getComputedStyle(document.documentElement), txt = css.getPropertyValue('--muted').trim() || '#667', line = css.getPropertyValue('--line').trim() || '#ddd', tcol = css.getPropertyValue('--text').trim() || '#111';
+    var scol = function (s) { return s.color === 'text' ? tcol : s.color; };
     var d = hist, rows = d ? d.rows : [], t0 = d ? d.t0 : dayStartFor(histOffset).getTime() / 1000, t1 = d ? d.t1 : t0 + 86400;
     var lo = Infinity, hi = -Infinity;
     rows.forEach(function (r) { cfg.series.forEach(function (s) { var v = r[s.key]; if (v !== null && v !== undefined) { if (v < lo) lo = v; if (v > hi) hi = v; } }); });
     if (lo === Infinity) { lo = cfg.zero ? 0 : 30; hi = cfg.zero ? 1 : 60; }
     if (cfg.zero) lo = 0;
     if (cfg.minMax) hi = Math.max(hi, cfg.minMax);
-    if (!cfg.zero) { lo -= 0.6; hi += 0.6; }
+    if (!cfg.zero) { var pd2 = cfg.pad !== undefined ? cfg.pad : 0.6; lo -= pd2; hi += pd2; }
+    if (cfg.minSpan && hi - lo < cfg.minSpan) { var mid = (hi + lo) / 2; lo = mid - cfg.minSpan / 2; hi = mid + cfg.minSpan / 2; }
     var ticks = niceTicks(lo, hi * (cfg.zero ? 1.04 : 1), H < 190 ? 4 : 5); lo = ticks[0]; hi = ticks[ticks.length - 1];
-    var L = 34, R = 10, T = 8, B = 22, pw = W - L - R, ph = H - T - B;
+    var L = cfg.id === 'h-pres' ? 44 : 34, R = 10, T = 8, B = 22, pw = W - L - R, ph = H - T - B;
     function X(t) { return L + (t - t0) / (t1 - t0) * pw; }
     function Y(v) { return T + (1 - (v - lo) / (hi - lo)) * ph; }
     // shaded hour stripes
@@ -934,7 +939,8 @@
     for (var hh = 1; hh < 24; hh += 2) ctx.fillRect(X(t0 + hh * 3600), T, pw / 24, ph);
     ctx.globalAlpha = 1;
     ctx.font = '11px -apple-system, system-ui, sans-serif'; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
-    ticks.forEach(function (v) { ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(W - R, Y(v)); ctx.stroke(); ctx.fillStyle = txt; ctx.fillText(String(v), L - 5, Y(v)); });
+    var tdp = cfg.id === 'h-pres' ? 2 : 0;
+    ticks.forEach(function (v) { ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(W - R, Y(v)); ctx.stroke(); ctx.fillStyle = txt; ctx.fillText(tdp ? v.toFixed(tdp) : String(v), L - 5, Y(v)); });
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     var step = W < 480 ? 6 : 3;
     for (var h2 = 0; h2 <= 24; h2 += step) { var tx = clamp(X(t0 + h2 * 3600), L + 12, W - R - 12); ctx.fillStyle = txt; ctx.fillText(hourLabel(h2), tx, H - 6); }
@@ -942,10 +948,10 @@
     ctx.save(); ctx.beginPath(); ctx.rect(L, T - 2, pw, ph + 4); ctx.clip();
     cfg.series.forEach(function (s) {
       if (s.type === 'dots') {
-        ctx.fillStyle = s.color; rows.forEach(function (r) { var v = r[s.key]; if (v === null || v === undefined) return; ctx.beginPath(); ctx.arc(X(r.t), Y(v), 1.7, 0, 6.3); ctx.fill(); });
+        ctx.fillStyle = scol(s); rows.forEach(function (r) { var v = r[s.key]; if (v === null || v === undefined) return; ctx.beginPath(); ctx.arc(X(r.t), Y(v), 1.7, 0, 6.3); ctx.fill(); });
         return;
       }
-      ctx.strokeStyle = s.color; ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.beginPath();
+      ctx.strokeStyle = scol(s); ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.beginPath();
       var prevT = null;
       rows.forEach(function (r) {
         var v = r[s.key]; if (v === null || v === undefined) { prevT = null; return; }
@@ -965,7 +971,7 @@
         var hx = X(best.t);
         ctx.strokeStyle = txt; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, T); ctx.lineTo(hx, T + ph); ctx.stroke();
         var lines = [new Date(best.t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })];
-        cfg.series.forEach(function (s) { var v = best[s.key]; if (v !== null && v !== undefined) { ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(hx, Y(v), 3.4, 0, 6.3); ctx.fill(); lines.push([s, s.name + ': ' + v.toFixed(s.dp !== undefined ? s.dp : cfg.dp) + s.unit]); } });
+        cfg.series.forEach(function (s) { var v = best[s.key]; if (v !== null && v !== undefined) { ctx.fillStyle = scol(s); ctx.beginPath(); ctx.arc(hx, Y(v), 3.4, 0, 6.3); ctx.fill(); lines.push([{ color: s.color === 'text' ? '#e8eef4' : scol(s) }, s.name + ': ' + v.toFixed(s.dp !== undefined ? s.dp : cfg.dp) + s.unit]); } });
         ctx.font = '600 12px -apple-system, system-ui, sans-serif';
         var bw = 0; lines.forEach(function (l, i) { var tx2 = i ? l[1] : l; bw = Math.max(bw, ctx.measureText(tx2).width + (i ? 16 : 0)); });
         bw += 16; var bh = lines.length * 17 + 8, bx = hx + 10; if (bx + bw > W - 2) bx = hx - 10 - bw; if (bx < 2) bx = 2;
@@ -1013,7 +1019,7 @@
       var ev = Math.max(0, Math.sin((hr - 14 + seed) / 3.2)) * Math.max(0, Math.sin(hr * 0.9 + seed)), rate = ev > 0.55 ? (ev - 0.55) * 0.9 : 0;
       acc += rate / 12;
       var ws = Math.max(0, 3 + 2.6 * Math.sin(hr * 1.1 + seed) + 1.5 * Math.sin(hr * 7.1));
-      rows.push({ t: t, temp: +(tc - (rate > 0 ? 3 : 0)).toFixed(1), dew: +(tc - 7 + (rate > 0 ? 6 : 0) + Math.sin(hr)).toFixed(1), wind: +ws.toFixed(1), gust: ws > 1 ? +(ws + 1.5 + Math.abs(Math.sin(hr * 5)) * 2.5).toFixed(1) : null, rate: +rate.toFixed(2), acc: +acc.toFixed(2) });
+      rows.push({ t: t, temp: +(tc - (rate > 0 ? 3 : 0)).toFixed(1), dew: +(tc - 7 + (rate > 0 ? 6 : 0) + Math.sin(hr)).toFixed(1), wind: +ws.toFixed(1), gust: ws > 1 ? +(ws + 1.5 + Math.abs(Math.sin(hr * 5)) * 2.5).toFixed(1) : null, rate: +rate.toFixed(2), acc: +acc.toFixed(2), pres: +(29.85 - 0.18 * Math.sin(hr / 7 + seed) - acc * 0.05).toFixed(2) });
     }
     return { ds: ymd(day), t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
   }
