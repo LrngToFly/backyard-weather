@@ -65,6 +65,8 @@ main { padding: 0 max(16px, env(safe-area-inset-left)) 28px max(16px, env(safe-a
   border-radius: 12px; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; padding: 0 4px;
 }
 .tab.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.map-wrap.sat-wrap { background: #0b1a2a; }
+.sat-wrap img { display: block; width: 100%; height: auto; aspect-ratio: 1; }
 .map-wrap { margin: 8px 0 4px; line-height: 0; border-radius: 12px; overflow: hidden; background: #ffffff; border: 1px solid var(--line); }
 #map, #radar { display: block; width: 100%; touch-action: pan-y; }
 .legend { display: block; margin: 6px 0 0; }
