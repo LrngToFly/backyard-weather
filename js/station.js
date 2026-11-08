@@ -36,7 +36,7 @@ async function loadStation() {
 // Ambient sends one "feels like" value; heat index and wind chill are worked out here with the National Weather Service formulas.
 function windChillF(t, w) { return t <= 50 && w >= 3 ? 35.74 + 0.6215 * t - 35.75 * Math.pow(w, 0.16) + 0.4275 * t * Math.pow(w, 0.16) : t; }
 function heatIndexF(t, rh) {
-  if (t == null || rh == null) return t;
+  if (t == null || rh == null || t < 80) return t; // like Weather Underground: the heat index only counts from 80°F
   var hi = 0.5 * (t + 61 + (t - 68) * 1.2 + rh * 0.094);
   if ((hi + t) / 2 < 80) return hi;
   hi = -42.379 + 2.04901523 * t + 10.14333127 * rh - 0.22475541 * t * rh - 0.00683783 * t * t - 0.05481717 * rh * rh +
@@ -297,16 +297,23 @@ async function loadDay(force, quiet, off) {
   if (away()) return;
   if (c && !force && (off > 0 || Date.now() - c.fetchedAt < 240000)) { if (off === 0) histFetchedAt = c.fetchedAt; show(c); return; }
   try {
-    var r = await wuFetch('history/all', '&date=' + ds);
+    // today: the last-24-hours service (Weather Underground's history for today's date can stop updating);
+    // past days: the history for that date
+    var r = off === 0 ? await wuFetch('observations/all/1day') : await wuFetch('history/all', '&date=' + ds);
     if (r.status === 204) { show({ kind: '5min', ds: ds, t0: t0, t1: t1, rows: [], fetchedAt: Date.now() }); if (!quiet) { histMsg = 'No readings reported for this day.'; renderHistory(); } return; }
     if (r.status === 401 || r.status === 403 || r.status === 429) throw wuRefused(r.status);
     if (!r.ok) throw new Error('Weather Underground HTTP ' + r.status);
-    var j = await r.json(), rows = parseObsRows(j.observations);
+    var j = await r.json(), rows = parseObsRows(j.observations).filter(function (x) { return x.t >= t0 && x.t < t1; });
     var h = { kind: '5min', ds: ds, t0: t0, t1: t1, rows: rows, fetchedAt: Date.now() };
     histCache[ds] = h; if (off === 0) histFetchedAt = h.fetchedAt;
-    if (off > 0 && rows.length) { idb.set(histKey(ds), h); pruneHist(); summarizeDay(ds, rows); }
+    // a past day is saved only when it looks complete (a full day is 288 readings); Weather Underground's history
+    // for a date sometimes lags behind, and a partial day is asked for again next time
+    var partial = off > 0 && rows.length > 0 && rows.length < 200;
+    if (off > 0 && rows.length && !partial) { idb.set(histKey(ds), h); pruneHist(); summarizeDay(ds, rows); }
+    if (partial) delete histCache[ds];
     log('Station history ' + ds + ': ' + rows.length + ' readings');
     if (!quiet && !rows.length) histMsg = 'No readings reported for this day.';
+    if (!quiet && partial) histMsg = 'Weather Underground has only ' + rows.length + ' of this day\'s readings so far; the rest usually fill in later.';
     if (away()) return;
     show(h);
   } catch (e) {
