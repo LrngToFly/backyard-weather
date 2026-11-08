@@ -106,14 +106,22 @@ function wuPauseMsg() {
     'The app stops asking until ' + new Date(wuPausedUntil()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + ', when the limit resets.';
 }
 function wuRefused(status) { return new Error(wuPausedUntil() ? wuPauseMsg() : 'Weather Underground rejected the key (HTTP ' + status + ')'); }
+// identical requests made at the same moment (e.g. start-up and returning to the app both refreshing) share one download
+var wuInflight = {};
 async function wuFetch(path, extra, soft) {
   if (wuPausedUntil()) { var e = new Error(wuPauseMsg()); e.paused = true; throw e; }
-  var r = await fetch(wuUrl(path, extra), { cache: 'no-store' });
-  if (!soft && (r.status === 401 || r.status === 403 || r.status === 429)) {
-    var d = new Date(); store.set('wx.wuPause', Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
-    log('Weather Underground refused the key (HTTP ' + r.status + '); pausing its requests until ' + new Date(wuPausedUntil()).toLocaleTimeString());
+  var url = wuUrl(path, extra), p = wuInflight[url];
+  if (!p) {
+    p = wuInflight[url] = fetch(url, { cache: 'no-store' }).then(function (r) {
+      if (!soft && (r.status === 401 || r.status === 403 || r.status === 429)) {
+        var d = new Date(); store.set('wx.wuPause', Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+        log('Weather Underground refused the key (HTTP ' + r.status + '); pausing its requests until ' + new Date(wuPausedUntil()).toLocaleTimeString());
+      }
+      return r;
+    });
+    p.then(function () { delete wuInflight[url]; }, function () { delete wuInflight[url]; });
   }
-  return r;
+  return (await p).clone(); // each caller reads its own copy of the answer
 }
 
 // IndexedDB key/value store for the larger saved data (maps, station history)
